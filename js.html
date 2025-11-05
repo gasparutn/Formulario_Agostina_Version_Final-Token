@@ -1,0 +1,1487 @@
+<script>
+const APP_URL = GLOBAL_APP_URL;
+// (MODIFICADO) Lee la nueva variable global de Index.html
+const PAGO_TOTAL_MP_VISIBLE = GLOBAL_PAGO_TOTAL_MP_VISIBLE;
+const CACHE_KEY = 'formDataCache';
+let numeroDeTurnoGuardado = null;
+// (NUEVO) Variable global para guardar los datos de edición
+let datosEdicionGlobales = null;
+
+// =========================================================
+// DEFINICIONES DE FUNCIONES
+// =========================================================
+
+/**
+ * (CORREGIDO) Handler para fallo de PASO 1 (Registro)
+ */
+function handleRegistroFailure(error) {
+  document.getElementById('submit-button').disabled = false;
+  document.getElementById('loader-registro').style.display = 'none';
+  const errorMessage = error.message || 'Ocurrió un error desconocido al registrar.';
+  document.getElementById('status-registro').innerHTML = `<div class="mensaje error"><strong>Error al Registrar:</strong> ${errorMessage}</div>`;
+}
+
+/**
+ * (NUEVO Y MODIFICADO) Handler para éxito de PASO 1. Llama a PASO 2.
+ * - Llama a 'paso2_procesarPostRegistro' (Sin Email/MP).
+ */
+function handlePaso1Success(response) {
+  if (response.status === 'OK_REGISTRO') {
+    // Pasa al Paso 2
+    document.getElementById('loader-registro').querySelector('p').textContent = 'Finalizando registro...';
+    
+    // (MODIFICADO) Llama a la nueva función SIN email y SIN link de pago
+    google.script.run
+      .withSuccessHandler(handlePagoSuccess) // Handler de éxito de Paso 2
+      .withFailureHandler(handlePagoFailure) // Handler de fallo de Paso 2
+      .paso2_procesarPostRegistro(response.datos, response.numeroDeTurno, response.hermanosRegistrados); // <--- (CORRECCIÓN) Llama a la función renombrada
+
+  } else {
+    // Si 'paso1_registrarRegistro' devolvió un error lógico (DNI duplicado, etc.)
+    handleRegistroFailure(response); // Usa el handler de fallo de registro
+  }
+}
+
+/**
+ * (MODIFICADO) Handler para éxito de PASO 2 (Creación de Pago)
+ * - Ya NO espera 'OK_PAGO' ni 'init_point' (Error que tenías).
+ * - 'OK_EFECTIVO' es ahora el único caso de éxito.
+ */
+function handlePagoSuccess(response) {
+  document.getElementById('registroForm').style.display = 'none';
+  document.getElementById('loader-registro').style.display = 'none';
+  const statusDiv = document.getElementById('status-registro');
+
+  const dniJustRegistered = response.dniRegistrado;
+  let listFromCache = JSON.parse(localStorage.getItem('pendingSiblings') || 'null');
+  let listToDisplay = [];
+  let isFinalRegistration = false;
+
+  if (listFromCache) {
+    listToDisplay = listFromCache.filter(h => h.dni !== dniJustRegistered);
+    if (listToDisplay.length === 0) {
+      isFinalRegistration = true;
+    }
+  } else if (response.hermanos && response.hermanos.length > 0) {
+    listToDisplay = response.hermanos;
+  }
+
+  let htmlHermanos = '';
+  if (isFinalRegistration) {
+    localStorage.removeItem('pendingSiblings');
+    htmlHermanos = `<div class="hermanos-post-registro"><h4>¡Registro Familiar Completo!</h4><p>Todos los hermanos/as han sido registrados exitosamente.</p></div>`;
+  } else if (listToDisplay.length > 0) {
+    localStorage.setItem('pendingSiblings', JSON.stringify(listToDisplay));
+    htmlHermanos = `<div class="hermanos-post-registro"><h4>¡Atención! Hermanos/as Pendientes</h4><p>El registro de <strong>${response.datos.nombre} ${response.datos.apellido}</strong> fue exitoso.</p><p>Quedan los siguientes hermanos/as por completar (requieren sus propios datos de salud, fotos, etc.):</p><ul>`;
+    listToDisplay.forEach(h => {
+      htmlHermanos += `<li>${h.nombre} ${h.apellido} (DNI: ...${h.dni.slice(-3)}) <button type="button" class="btn-completar-hermano" data-dni="${h.dni}" data-tipo="${h.tipo}">Completar Datos Ahora</button></li>`;
+    });
+    htmlHermanos += `</ul><p>Puede completar sus datos ahora (recomendado) o volver a esta página más tarde e ingresar el DNI del hermano/a para validarlo.</p></div>`;
+  } else {
+    localStorage.removeItem('pendingSiblings');
+  }
+
+  // (MODIFICADO) Se elimina el bloque 'OK_PAGO'.
+  // 'OK_EFECTIVO' ahora maneja todos los casos de éxito (Efectivo, Transf, Cuotas).
+  if (response && (response.status === 'OK_EFECTIVO' || response.status === 'OK_REGISTRO_SIN_PAGO')) {
+    statusDiv.innerHTML = `
+    <div class="mensaje exito">${response.message}</div>
+    ${htmlHermanos}
+    <button type="button" id="btn-volver-form-limpio" class="btn-final-volver" style="margin-top: 20px;">Volver a Iniciar (Formulario Limpio)</button>
+    `;
+
+  } else {
+    // Error genérico o si 'OK_REGISTRO_SIN_LINK' (fallback) es devuelto.
+    const errorMessage = response.message || 'Ocurrió un error desconocido en el paso 2.';
+    statusDiv.innerHTML = `<div class="mensaje error"><strong>Error:</strong> ${errorMessage}</div>
+    ${htmlHermanos}
+    <button type="button" id="btn-volver-form-limpio" class="btn-final-volver" style="margin-top: 20px;">Volver a Iniciar (Formulario Limpio)</button>
+    `;
+  }
+
+  // Listeners para los botones de la pantalla final
+  if (document.getElementById('btn-volver-form-limpio')) {
+    document.getElementById('btn-volver-form-limpio').addEventListener('click', function() {
+      limpiarCache(); // Limpia caché de formulario y de hermanos
+      window.top.location.href = APP_URL;
+    });
+  }
+
+  document.querySelectorAll('.btn-completar-hermano').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const dni = this.dataset.dni;
+      const tipo = this.dataset.tipo;
+      localStorage.setItem('autoValidateDNI', dni);
+      localStorage.setItem('autoValidateType', tipo);
+      window.top.location.href = APP_URL;
+    });
+  });
+}
+
+
+/**
+ * (CORREGIDO) Handler para fallo de PASO 2 (Creación de Pago)
+ * Mensaje actualizado para reflejar que el email ya no es un paso.
+ */
+function handlePagoFailure(error) {
+  document.getElementById('submit-button').disabled = false;
+  document.getElementById('loader-registro').style.display = 'none';
+  const errorMessage = error.message || error;
+  document.getElementById('status-registro').innerHTML = `<div class="mensaje aviso">
+  <strong>¡¡REGISTRO GUARDADO!!</strong><br>
+  Pero ocurrió un error al finalizar el registro: ${errorMessage}.
+  <br>Por favor, contacte a la administración con su número de turno si el problema persiste.
+  </div>`;
+}
+
+/**
+ * (MODIFICADO) Handler para éxito de validación de Hermano
+ * Ya no usa 'alert', ahora escribe en el modal.
+ * (MODIFICADO) Tiempo de espera aumentado a 3.5s
+ */
+function handleValidacionHermanoSuccess(response) {
+  // Ocultar loader y reactivar botón del modal
+  document.getElementById('loader-hermano-modal').style.display = 'none';
+  const btnValidar = document.getElementById('btn-modal-validar-hermano');
+  btnValidar.disabled = false;
+  btnValidar.textContent = 'Validar DNI';
+  const statusDiv = document.getElementById('status-hermano-modal');
+
+  if (response.status.startsWith('OK_')) {
+    // Mostrar éxito en el modal
+    statusDiv.innerHTML = `<div class="mensaje exito">${response.message}</div>`;
+    // Agregar la fila
+    addHermanoCampos(response.datos);
+    guardarFormEnCache();
+    
+    // --- (INICIO DE MODIFICACIÓN) ---
+    // Cerrar el modal después de un retraso más largo
+    setTimeout(() => {
+      document.getElementById('hermano-modal-backdrop').style.display = 'none';
+      statusDiv.innerHTML = ''; // Limpiar
+      document.getElementById('hermano-modal-dni').value = ''; // Limpiar
+    }, 3500); // 3.5 segundos
+    // --- (FIN DE MODIFICACIÓN) ---
+
+  } else {
+    // Error lógico (DNI duplicado, etc.)
+    statusDiv.innerHTML = `<div class="mensaje error">${response.message}</div>`;
+  }
+}
+
+/**
+ * (MODIFICADO) Handler para fallo de validación de Hermano
+ * Ya no usa 'alert', ahora escribe en el modal.
+ */
+function handleValidacionHermanoFailure(error) {
+  // Ocultar loader y reactivar botón del modal
+  document.getElementById('loader-hermano-modal').style.display = 'none';
+  const btnValidar = document.getElementById('btn-modal-validar-hermano');
+  btnValidar.disabled = false;
+  btnValidar.textContent = 'Validar DNI';
+  
+  // Mostrar error en el modal
+  const statusDiv = document.getElementById('status-hermano-modal');
+  statusDiv.innerHTML = `<div class="mensaje error">Error de conexión: ${error.message}</div>`;
+}
+
+
+// =========================================================
+// --- ¡¡INICIO DE LA LÓGICA DE VALIDACIÓN!! ---
+// (MODIFICADO) Implementa Petición 2 (Botón Editar)
+// =========================================================
+
+function handleValidationSuccess(response) {
+  document.getElementById('btn-validar').disabled = false;
+  document.getElementById('loader-validacion').style.display = 'none';
+  const statusDiv = document.getElementById('status-validacion');
+
+  // (NUEVO) Leer la variable B24 que pasamos desde Index.html
+  const pagoTotalMPVisible = (response.pagoTotalMPVisible === true);
+  
+  // (NUEVO) Guardar datos de edición
+  if (response.datos) {
+    datosEdicionGlobales = response.datos;
+  }
+
+  if (response.status === 'HERMANO_COMPLETAR') {
+    statusDiv.innerHTML = `<div class="mensaje aviso" style="text-align: left;">${response.message}</div>`;
+    document.getElementById('esHermanoCompletando').value = "true";
+    const seccionHermanos = document.getElementById('seccion-hermanos');
+    if (seccionHermanos) seccionHermanos.style.display = 'none';
+    iniciarTemporizador(response); 
+
+  } else if (response.status === 'OK_PREVENTA' || response.status === 'OK' || response.status === 'OK_NUEVO') {
+    document.getElementById('esHermanoCompletando').value = "false";
+    const seccionHermanos = document.getElementById('seccion-hermanos');
+
+    // --- (INICIO DE MODIFICACIÓN SOLICITADA) ---
+    // Se muestra la sección de hermanos para TODOS los casos de éxito (Nuevo, Anterior y Pre-Venta)
+    if (seccionHermanos) {
+      seccionHermanos.style.display = 'block';
+    }
+    // --- (FIN DE MODIFICACIÓN SOLICITADA) ---
+
+    iniciarTemporizador(response);
+
+  } else if (response.status === 'REGISTRO_ENCONTRADO') {
+
+    let html = '';
+    const proximaCuotaMsg = response.proximaCuotaPendiente && !response.message.includes('PAGADO')
+      ? `<br><strong>Próxima Cuota Pendiente: ${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.`
+      : '';
+
+    // Mensaje de Estado (Aviso o Éxito)
+    // (CORRECCIÓN BUG PAGADO/PAGADA)
+    if (response.message.includes('PAGADA') || response.message.includes('PAGADO')) {
+      html += `<div class="mensaje exito" style="margin-bottom:10px; text-align:left;"><strong>${response.message}</strong></div>`;
+    } else {
+      let msgPago = response.message_pago ? `<br>${response.message_pago}` : '';
+      html += `<div class="mensaje aviso" style="margin-bottom:10px; text-align:left;"><strong>${response.message}</strong>${msgPago}${proximaCuotaMsg}</div>`;
+    }
+
+    // Sección Adeuda Aptitud
+    if (response.adeudaAptitud === true) {
+      html += `
+      <div id="aptitud-manual-seccion" style="margin-top: 15px; padding: 10px; border: 1px solid #e67e22; border-radius: 5px; background: #fdf5e6;">
+      <h3 style="background-color: #e67e22; color: white; padding: 10px;">¡Atención!</h3>
+      <p style="text-align: center; font-weight: bold; color: #e67e22;">Adeuda Certificado de Aptitud Física</p>
+      <p>Por favor, suba el certificado para completar la ficha.</p>
+      <label for="aptitud-manual-upload" class="file-input-label" style="background-color: #e67e22;">Seleccionar Certificado</label>
+      <input type="file" id="aptitud-manual-upload" accept="image/jpeg, image/png, application/pdf">
+      <span id="aptitud-manual-name" class="file-name">Ningún archivo seleccionado</span>
+      <button type="button" id="btn-submit-aptitud-manual" style="background-color: #e67e22; width: 100%; height:45px">Subir Certificado!!!</button>
+      <div class="loader" id="loader-aptitud" style="display: none;"><div class="spinner"></div><p>Subiendo...</p></div>
+      </div>`;
+    }
+
+    // =========================================================
+    // --- ¡¡INICIO DE LA CORRECCIÓN (SOLUCIÓN A TU REPORTE)!! ---
+    // =========================================================
+    
+    // (CORRECCIÓN 1) Esta es la lógica que soluciona tu problema.
+    // Solo se muestra si el mensaje NO incluye "PAGADO" ni "PAGADA".
+    
+    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA')) {
+      html += `
+      <div id="comprobante-manual-seccion" style="margin-top: 15px; border: 1px solid var(--color-principal); padding: 15px; border-radius: 5px;">
+      `;
+
+      // (Lógica de MP eliminada)
+      html += `<h3>Subir un comprobante (Cuota, Transferencia, etc.):</h3>`;
+      
+      // Mensaje de cuotas (si aplica)
+      if (response.metodoPago === 'Pago en Cuotas' && response.proximaCuotaPendiente) {
+         html += `<div class="mensaje-cuota">Está por subir un comprobante para la <strong>${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.</div>`;
+      }
+
+
+      // --- INICIO DE MODIFICACIONES DE SELECTOR ---
+      html += `
+      <label for="tipo-comprobante-select">Seleccione el tipo de comprobante:</label>
+      <select id="tipo-comprobante-select">
+        <option value="">-- Elija una opción --</option>
+        
+                <option value="mp_total" style="display: ${pagoTotalMPVisible ? 'block' : 'none'};">a) Comprobante 1 pago Mercado Pago Monto Total</option>
+        
+                <option value="mp_cuotas_group" style="display: ${response.metodoPago === 'Pago en Cuotas' ? 'block' : 'none'};">b) Comprobante Pagos 3 cuotas</option>
+        
+        <option value="externo" style="display: ${response.metodoPago !== 'Pago en Cuotas' ? 'block' : 'none'};">c) Comprobante Externo (Transferencia, etc.)</option>
+      </select>
+
+            <div id="cuota-selector-container" style="display: none; margin-top: 10px;">
+        <label for="cuota-selector">Seleccione la Cuota a la que corresponde el comprobante:</label>
+        <select id="cuota-selector">
+          <option value="">-- Seleccione Cuota --</option>
+          <option value="mp_cuota_1">b.1) Comprobante Cuota 1</option>
+          <option value="mp_cuota_2">b.2) Comprobante Cuota 2</option>
+          <option value="mp_cuota_3">b.3) Comprobante Cuota 3</option>
+          <option value="mp_cuota_total">b.4) Comprobante Cancelación total (Paga las 3 juntas)</option>
+        </select>
+      </div>
+      `;
+      // --- FIN DE MODIFICACIONES DE SELECTOR ---
+
+      html += `
+      <div id="datos-externo-container">
+      <label for="externo-nombre-pagador">Nombre y Apellido (del Adulto Pagador):</label>
+      <input type="text" id="externo-nombre-pagador" placeholder="Nombre Apellido (Quien paga)">
+      <label for="externo-dni-pagador">DNI (del Adulto Pagador):</label>
+      <input type="tel" id="externo-dni-pagador" placeholder="DNI (Quien paga)" pattern="[0-9]{8}" inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos.">
+      </div>
+
+      <div id="upload-file-container">
+      <label for="comprobante-manual-upload" class="file-input-label" style="background-color: #7f8c8d;">Seleccionar Archivo para Subir</label>
+      <input type="file" id="comprobante-manual-upload" accept="image/jpeg, image/png, application/pdf">
+      <div style="display: flex; align-items: center; margin-bottom: 15px;">
+      <span id="comprobante-manual-name" class="file-name" style="margin-bottom: 0;">Ningún archivo seleccionado</span>
+      <button type="button" id="btn-clear-comprobante" class="btn-remover" style="display:none; margin-top: 0; margin-left: 10px;">X</button>
+      </div>
+      <button type="button" id="btn-submit-comprobante-manual">Subir Comprobante</button>
+      
+      <div class="loader" id="loader-comprobante" style="display: none; margin-top: 15px;"><div class="spinner"></div><p>Subiendo comprobante...</p></div>
+      
+      </div>
+
+      <hr style="margin-top:20px;">
+      <button type="button" id="btn-finalizar-upload" class="btn-final-volver">Finalizar Carga (Volver)</button>
+      </div>
+      `;
+    } else {
+      // Si el pago ESTÁ completo Y NO adeuda aptitud, muestra solo el botón de volver.
+      if (response.adeudaAptitud !== true) {
+        html += `<button type="button" id="btn-finalizar-upload" class="btn-final-volver">Volver al Inicio</button>`;
+      }
+    }
+    // =========================================================
+    // --- ¡¡FIN DE LA CORRECCIÓN!! ---
+    // =========================================================
+
+
+    // =========================================================
+    // --- INICIO PETICIÓN (Botón Editar Formulario) ---
+    // =========================================================
+    
+    // Este bloque se muestra SIEMPRE que se encuentra un registro.
+    html += `
+    <div id="editar-info-seccion" style="margin-top: 20px;">
+      
+      <button type="button" id="btn-mostrar-editar" class="btn-editar">Editar Datos de Contacto / Autorizados</button>
+      
+      <div id="editar-form-container" style="display: none; border: 2px dashed #007bff; padding: 15px; margin-top: 10px; background: #f8f9fa;">
+        <h3>Editando Datos</h3>
+        <p>Modifique solo los campos necesarios. Los campos de DNI e Email del inscripto no se pueden cambiar.</p>
+        
+        <label for="edit-dni">DNI Inscripto (Bloqueado)</label>
+        <input type="text" id="edit-dni" readonly class="campo-bloqueado">
+        
+        <label for="edit-email">Email (Bloqueado)</label>
+        <input type="email" id="edit-email" readonly class="campo-bloqueado">
+        
+        <label for="edit-adultoResponsable1">Adulto Responsable 1</label>
+        <input type="text" id="edit-adultoResponsable1" class="form-cache">
+        
+        <label for="edit-dniResponsable1">DNI Responsable 1</label>
+        <input type="tel" id="edit-dniResponsable1" class="form-cache" maxlength="8" pattern="[0-9]{8}">
+        
+        <label for="edit-telResp1">Tel. Responsable 1 (Ej: (261) 5123456)</label>
+        <input type="tel" id="edit-telResp1" class="form-cache">
+        
+        <label for="edit-adultoResponsable2">Adulto Responsable 2 (Opcional)</label>
+        <input type="text" id="edit-adultoResponsable2" class="form-cache">
+        
+        <label for="edit-telResp2">Tel. Responsable 2 (Opcional)</label>
+        <input type="tel" id="edit-telResp2" class="form-cache">
+        
+        <label>Personas Autorizadas (Edite la lista completa)</label>
+        <div id="edit-autorizados-container">
+          </div>
+        <button type="button" id="btn-edit-add-autorizado" class="btn-dinamico" style="width: auto;">+ Agregar Autorizado</button>
+        
+        <label for="edit-aptitud-upload" style="margin-top: 15px;">Reemplazar Certificado de Aptitud (Opcional)</label>
+        <p style="font-size: 0.9em; margin-bottom: 10px;">(Solo seleccione un archivo si desea reemplazar el existente o subir uno nuevo).</p>
+        <input type="file" id="edit-aptitud-upload" accept="image/jpeg, image/png, application/pdf">
+        <label for="edit-aptitud-upload" class="file-input-label">Seleccionar Nuevo Certificado</label>
+        <span id="edit-aptitud-name" class="file-name">Ningún archivo seleccionado</span>
+        <div class="loader-archivo" id="loader-edit-aptitud"></div>
+        <input type="hidden" id="edit-urlCertificadoAptitud">
+
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+           <button type="button" id="btn-guardar-cambios" class="btn-guardar" style="width: 50%;">Guardar Cambios</button>
+           <button type="button" id="btn-cancelar-edicion" class="btn-cancelar" style="width: 50%;">Cancelar</button>
+        </div>
+      </div>
+    </div>
+    `;
+    // =========================================================
+    // --- FIN PETICIÓN (Botón Editar Formulario) ---
+    // =========================================================
+
+    statusDiv.innerHTML = html;
+
+    // --- Listeners para Aptitud (si se mostró) ---
+    if (response.adeudaAptitud === true) {
+      document.getElementById('aptitud-manual-upload').addEventListener('change', function() {
+        document.getElementById('aptitud-manual-name').textContent = this.files[0] ? this.files[0].name : 'Ningún archivo seleccionado';
+      });
+      document.getElementById('btn-submit-aptitud-manual').addEventListener('click', submitAptitudManual);
+    }
+
+    // --- Listeners para Subida de Comprobante (si se mostró) ---
+    // (CORRECCIÓN 1) Se cambió la condición
+    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA')) { 
+      const cuotaSelectorContainer = document.getElementById('cuota-selector-container');
+      const datosExternoContainer = document.getElementById('datos-externo-container');
+      const uploadFileContainer = document.getElementById('upload-file-container');
+      const cuotaSelector = document.getElementById('cuota-selector');
+      const fileInputComprobante = document.getElementById('comprobante-manual-upload');
+      const btnClearComprobante = document.getElementById('btn-clear-comprobante');
+
+      const tipoComprobanteSelect = document.getElementById('tipo-comprobante-select');
+      if (tipoComprobanteSelect) {
+        tipoComprobanteSelect.addEventListener('change', function() {
+          const tipo = this.value;
+          
+          // (MODIFICADO) Ocultar/Mostrar contenedores
+          datosExternoContainer.style.display = (tipo) ? 'block' : 'none';
+          uploadFileContainer.style.display = (tipo) ? 'block' : 'none';
+          cuotaSelectorContainer.style.display = (tipo === 'mp_cuotas_group') ? 'block' : 'none';
+
+          if (tipo !== 'mp_cuotas_group' && cuotaSelector) {
+            cuotaSelector.value = ''; // Resetear sub-menú
+          }
+          if(fileInputComprobante) fileInputComprobante.value = '';
+          if(document.getElementById('comprobante-manual-name')) document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
+          if(btnClearComprobante) btnClearComprobante.style.display = 'none';
+        });
+      }
+
+      if (fileInputComprobante) {
+        fileInputComprobante.addEventListener('change', function() {
+          const file = this.files[0];
+          document.getElementById('comprobante-manual-name').textContent = file ? file.name : 'Ningún archivo seleccionado';
+          btnClearComprobante.style.display = file ? 'inline-block' : 'none';
+        });
+      }
+
+      if (btnClearComprobante) {
+        btnClearComprobante.addEventListener('click', function() {
+          fileInputComprobante.value = '';
+          document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
+          this.style.display = 'none';
+        });
+      }
+
+      const btnSubmitComprobante = document.getElementById('btn-submit-comprobante-manual');
+      if (btnSubmitComprobante) {
+        btnSubmitComprobante.addEventListener('click', function() {
+          const file = fileInputComprobante.files[0];
+          const tipoComprobanteSelect = document.getElementById('tipo-comprobante-select');
+          let tipoComprobante = tipoComprobanteSelect.value;
+          
+          // =========================================================
+          // --- ¡¡INICIO DE LA CORRECCIÓN (BUG DEL LOADER)!! ---
+          // =========================================================
+          const loaderComprobante = document.getElementById('loader-comprobante'); // <--- Apuntar al loader local
+          loaderComprobante.style.display = 'none';
+          loaderComprobante.innerHTML = `<div class="spinner"></div><p>Subiendo comprobante...</p>`; // Reset
+          
+          // (Request 3) Leer valor del sub-menú
+          if (tipoComprobante === 'mp_cuotas_group') {
+            const cuotaSelector = document.getElementById('cuota-selector');
+            if (!cuotaSelector.value) {
+              // (PETICIÓN 1 - MODIFICADO)
+              loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Por favor, seleccione la Cuota (b.1, b.2, b.3 o b.4) a la que corresponde el comprobante.</div>`;
+              loaderComprobante.style.display = 'block';
+              return;
+            }
+            tipoComprobante = cuotaSelector.value; // Ahora es 'mp_cuota_1', 'mp_cuota_total', etc.
+          }
+          
+          if (!tipoComprobante) {
+             // (PETICIÓN 1 - MODIFICADO)
+             loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Por favor, seleccione el tipo de comprobante.</div>`;
+             loaderComprobante.style.display = 'block';
+             return;
+          }
+
+          let datosExtras = null;
+          const nombrePagador = document.getElementById('externo-nombre-pagador').value;
+          const dniPagadorInput = document.getElementById('externo-dni-pagador');
+          const dniPagador = dniPagadorInput.value;
+
+          if (!nombrePagador || !dniPagador) {
+            // (PETICIÓN 1 - MODIFICADO)
+            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Por favor, complete el Nombre/Apellido y DNI del Adulto Pagador.</div>`;
+            loaderComprobante.style.display = 'block';
+            return;
+          }
+          if (!/^[0-9]{8}$/.test(dniPagador)) {
+            // (PETICIÓN 1 - MODIFICADO)
+            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Error: El DNI del Adulto Pagador debe tener exactamente 8 dígitos numéricos.</div>`;
+            loaderComprobante.style.display = 'block';
+            dniPagadorInput.focus();
+            return;
+          }
+          datosExtras = { nombrePagador: nombrePagador, dniPagador: dniPagador };
+
+          const dni = document.getElementById('dni-input').value;
+          
+          // (PETICIÓN 1 - MODIFICADO)
+          if (!file) { 
+            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Tenes que adjuntar un comprobante.</div>`;
+            loaderComprobante.style.display = 'block';
+            return; 
+          }
+          // =========================================================
+          // --- ¡¡FIN DE LA CORRECCIÓN (BUG DEL LOADER)!! ---
+          // =========================================================
+
+          this.disabled = true;
+          fileInputComprobante.disabled = true;
+          if(document.getElementById('btn-finalizar-upload')) document.getElementById('btn-finalizar-upload').disabled = true;
+
+          // (CORRECCIÓN 2) Apuntar al loader correcto
+          loaderComprobante.style.display = 'block';
+
+          comprimirYLeerArchivo(file).then(fileData => {
+            google.script.run
+            .withSuccessHandler(handleComprobanteUploadSuccess)
+            .withFailureHandler(handleComprobanteUploadFailure)
+            .subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras);
+          }).catch(err => {
+            handleComprobanteUploadFailure(err);
+          });
+        });
+      }
+    } 
+    
+    // --- Listener para Botón Finalizar (si se mostró) ---
+    const btnFinalizar = document.getElementById('btn-finalizar-upload');
+    if (btnFinalizar) {
+      btnFinalizar.addEventListener('click', function() {
+        window.top.location.href = APP_URL;
+      });
+    }
+
+    // --- (NUEVO) Listeners para Edición ---
+    document.getElementById('btn-mostrar-editar').addEventListener('click', mostrarFormEdicion);
+    document.getElementById('btn-cancelar-edicion').addEventListener('click', ocultarFormEdicion);
+    document.getElementById('btn-edit-add-autorizado').addEventListener('click', () => addAutorizadoCamposEdicion());
+    document.getElementById('edit-aptitud-upload').addEventListener('change', manejarSubidaAptitudEdicion);
+    document.getElementById('btn-guardar-cambios').addEventListener('click', submitDatosEditados);
+
+
+  } else { // Errores y otros avisos (DNI no encontrado, etc.)
+    statusDiv.innerHTML = `<div class="mensaje error"><strong>Aviso:</strong> ${response.message}</div>`;
+  }
+}
+
+/**
+ * Handler para fallo de PASO 1 (Validación)
+ */
+function handleValidationFailure(error) {
+  document.getElementById('btn-validar').disabled = false;
+  document.getElementById('loader-validacion').style.display = 'none';
+  const statusDiv = document.getElementById('status-validacion');
+  statusDiv.innerHTML = `<div class="mensaje error"><strong>Error en el Servidor:</strong> ${error.message}</div>`;
+}
+
+// =========================================================
+// --- (NUEVO) FUNCIONES PARA SECCIÓN "EDITAR DATOS" ---
+// =========================================================
+
+/**
+ * Puebla y muestra el formulario de edición de datos.
+ */
+function mostrarFormEdicion() {
+  if (!datosEdicionGlobales) {
+    alert('Error: No se cargaron los datos para editar.');
+    return;
+  }
+  
+  // Poblar campos
+  document.getElementById('edit-dni').value = datosEdicionGlobales.dni || '';
+  document.getElementById('edit-email').value = datosEdicionGlobales.email || '';
+  document.getElementById('edit-adultoResponsable1').value = datosEdicionGlobales.adultoResponsable1 || '';
+  document.getElementById('edit-dniResponsable1').value = datosEdicionGlobales.dniResponsable1 || '';
+  document.getElementById('edit-telResp1').value = datosEdicionGlobales.telResponsable1 || '';
+  document.getElementById('edit-adultoResponsable2').value = datosEdicionGlobales.adultoResponsable2 || '';
+  document.getElementById('edit-telResp2').value = datosEdicionGlobales.telResp2 || '';
+  
+  // Resetear campo de aptitud
+  document.getElementById('edit-aptitud-upload').value = '';
+  document.getElementById('edit-aptitud-name').textContent = 'Ningún archivo seleccionado';
+  document.getElementById('edit-urlCertificadoAptitud').value = '';
+  document.getElementById('loader-edit-aptitud').style.display = 'none';
+
+  // Poblar autorizados
+  const container = document.getElementById('edit-autorizados-container');
+  container.innerHTML = ''; // Limpiar
+  if (datosEdicionGlobales.personasAutorizadas) {
+    const autorizados = datosEdicionGlobales.personasAutorizadas.split(',');
+    autorizados.forEach(aut => {
+      const autTrim = aut.trim();
+      if (autTrim) {
+        const match = autTrim.match(/(.*)\(DNI:\s?(\d+)\)/);
+        if (match) {
+          addAutorizadoCamposEdicion(match[1].trim(), match[2].trim());
+        } else {
+          addAutorizadoCamposEdicion(autTrim, '');
+        }
+      }
+    });
+  }
+  // Añadir uno vacío si no hay ninguno
+  if (container.children.length === 0) {
+    addAutorizadoCamposEdicion();
+  }
+
+  // Ocultar botón "Editar" y mostrar formulario
+  document.getElementById('editar-form-container').style.display = 'block';
+  document.getElementById('btn-mostrar-editar').style.display = 'none';
+}
+
+/**
+ * Oculta el formulario de edición y resetea los campos.
+ */
+function ocultarFormEdicion() {
+  document.getElementById('editar-form-container').style.display = 'none';
+  document.getElementById('btn-mostrar-editar').style.display = 'block';
+  // (Opcional) resetear campos por seguridad
+  document.getElementById('edit-aptitud-upload').value = '';
+  document.getElementById('edit-aptitud-name').textContent = 'Ningún archivo seleccionado';
+  document.getElementById('edit-urlCertificadoAptitud').value = '';
+}
+
+/**
+ * Añade una fila de autorizado al formulario de EDICIÓN.
+ */
+function addAutorizadoCamposEdicion(nombre = '', dni = '') {
+  const container = document.getElementById('edit-autorizados-container');
+  const div = document.createElement('div');
+  div.className = 'fila-dinamica';
+
+  div.innerHTML = `
+  <div class="campos-dinamicos">
+  <input type="text" class="edit-autorizado-nombre" placeholder="Nombre y Apellido (Relación)" value="${nombre}">
+  <input type="tel" class="edit-autorizado-dni" placeholder="DNI (8 dígitos)" maxlength="8" pattern="[0-9]{8}" inputmode="numeric" value="${dni}" title="El DNI debe tener exactamente 8 dígitos numéricos.">
+  </div>
+  <button type="button" class="btn-remover" onclick="removerFila(this)">X</button>
+  `;
+  container.appendChild(div);
+}
+
+/**
+ * Maneja la subida del NUEVO certificado de aptitud en la sección de EDICIÓN.
+ */
+function manejarSubidaAptitudEdicion() {
+  const inputElement = document.getElementById('edit-aptitud-upload');
+  const file = inputElement.files[0];
+  const nombreLabel = document.getElementById('edit-aptitud-name');
+  const loader = document.getElementById('loader-edit-aptitud');
+  const urlHidden = document.getElementById('edit-urlCertificadoAptitud');
+  const dni = document.getElementById('edit-dni').value; // DNI del inscripto
+
+  urlHidden.value = '';
+  loader.style.display = 'none';
+  nombreLabel.textContent = 'Ningún archivo seleccionado';
+  if (!file) return;
+
+  nombreLabel.textContent = file.name;
+  loader.className = 'loader-archivo';
+  loader.style.display = 'block';
+  loader.textContent = 'Preparando archivo...';
+
+  // Deshabilitar botones mientras se sube
+  inputElement.disabled = true;
+  document.getElementById('btn-guardar-cambios').disabled = true;
+
+  comprimirYLeerArchivo(file).then(fileData => {
+    loader.textContent = 'Subiendo archivo...';
+    google.script.run
+    .withSuccessHandler(function(response) {
+      inputElement.disabled = false;
+      document.getElementById('btn-guardar-cambios').disabled = false;
+      if (response.status === 'OK') {
+        loader.className = 'loader-archivo exito';
+        loader.textContent =   '✅ Nuevo certificado subido. Pulse "Guardar Cambios".'  ;
+        urlHidden.value = response.url; // Guarda la URL para el submit final
+      } else {
+        loader.className = 'loader-archivo error';
+        loader.textContent =   `❌ Error:   ${response.message}`;
+        inputElement.value = '';
+        nombreLabel.textContent = 'Ningún archivo seleccionado';
+      }
+    })
+    .withFailureHandler(function(error) {
+      inputElement.disabled = false;
+      document.getElementById('btn-guardar-cambios').disabled = false;
+      loader.className = 'loader-archivo error';
+      loader.textContent =   `❌ Error de conexión:   ${error.message}`;
+      inputElement.value = '';
+      nombreLabel.textContent = 'Ningún archivo seleccionado';
+    })
+    .subirArchivoIndividual(fileData, dni, 'ficha'); // Sube como 'ficha'
+  }).catch(err => {
+    inputElement.disabled = false;
+    document.getElementById('btn-guardar-cambios').disabled = false;
+    loader.className = 'loader-archivo error';
+    loader.textContent =   `❌ Error al procesar:   ${err.message}`;
+    inputElement.value = '';
+    nombreLabel.textContent = 'Ningún archivo seleccionado';
+  });
+}
+
+/**
+ * Recolecta y envía los datos editados al servidor.
+ */
+function submitDatosEditados() {
+  const dni = document.getElementById('edit-dni').value;
+  
+  // Recolectar datos
+  const datosEditados = {
+    adultoResponsable1: document.getElementById('edit-adultoResponsable1').value,
+    dniResponsable1: document.getElementById('edit-dniResponsable1').value,
+    telResp1: document.getElementById('edit-telResp1').value,
+    adultoResponsable2: document.getElementById('edit-adultoResponsable2').value,
+    telResp2: document.getElementById('edit-telResp2').value,
+    urlCertificadoAptitud: document.getElementById('edit-urlCertificadoAptitud').value // Solo tendrá valor si se subió uno nuevo
+  };
+
+  // Validar DNI Responsable 1 (si se ingresó)
+  if (datosEditados.dniResponsable1 && !/^[0-9]{8}$/.test(datosEditados.dniResponsable1)) {
+     alert('Error: El DNI del Responsable 1 debe tener 8 dígitos numéricos.');
+     document.getElementById('edit-dniResponsable1').focus();
+     return;
+  }
+
+  // Recolectar y validar autorizados
+  const nombresAut = document.querySelectorAll('.edit-autorizado-nombre');
+  const dnisAut = document.querySelectorAll('.edit-autorizado-dni');
+  let autorizadosValidos = 0;
+  let autorizadosArray = [];
+
+  for (let i = 0; i < nombresAut.length; i++) {
+    const nombre = nombresAut[i].value.trim();
+    const dniAut = dnisAut[i] ? dnisAut[i].value.trim() : '';
+
+    if (nombre && dniAut) {
+      if (!/^[0-9]{8}$/.test(dniAut)) {
+        alert('Error: El DNI de la persona autorizada (' + nombre + ') debe tener exactamente 8 dígitos numéricos.');
+        dnisAut[i].focus();
+        return;
+      }
+      autorizadosArray.push(`${nombre} (DNI: ${dniAut})`);
+      autorizadosValidos++;
+    } else if (nombre && !dniAut) {
+       alert('Error: Por favor complete el DNI de la persona autorizada (' + nombre + ').');
+       dnisAut[i].focus();
+       return;
+    } else if (!nombre && dniAut) {
+       alert('Error: Por favor complete el Nombre de la persona autorizada con DNI ' + dniAut + '.');
+       nombresAut[i].focus();
+       return;
+    }
+  }
+
+  if (autorizadosValidos === 0) {
+    alert('Error: Debe ingresar al menos una persona autorizada (Nombre y DNI).');
+    return;
+  }
+  datosEditados.personasAutorizadas = autorizadosArray.join(', ');
+
+  // Deshabilitar botones y mostrar loader
+  document.getElementById('btn-guardar-cambios').disabled = true;
+  document.getElementById('btn-cancelar-edicion').disabled = true;
+  const loader = document.getElementById('loader-validacion'); // Reusamos el loader principal
+  const statusDiv = document.getElementById('status-validacion');
+  loader.style.display = 'block';
+  loader.querySelector('p').textContent = "Guardando cambios...";
+  statusDiv.innerHTML = ''; // Limpiar errores previos
+
+  // Enviar al servidor
+  google.script.run
+    .withSuccessHandler(function(response) {
+      loader.style.display = 'none';
+      document.getElementById('btn-guardar-cambios').disabled = false;
+      document.getElementById('btn-cancelar-edicion').disabled = false;
+
+      if (response.status === 'OK') {
+        // Mostrar éxito y recargar la página para ver los cambios
+        alert('¡Datos actualizados con éxito! La página se recargará.');
+        window.top.location.href = APP_URL; // Recarga
+      } else {
+        statusDiv.innerHTML = `<div class="mensaje error" style="margin-bottom:10px;">Error al guardar: ${response.message}</div>`;
+      }
+    })
+    .withFailureHandler(function(error) {
+      loader.style.display = 'none';
+      document.getElementById('btn-guardar-cambios').disabled = false;
+      document.getElementById('btn-cancelar-edicion').disabled = false;
+      statusDiv.innerHTML = `<div class="mensaje error" style="margin-bottom:10px;">Error de conexión: ${error.message}</div>`;
+    })
+    .actualizarDatosPersonales(dni, datosEditados);
+}
+
+// =========================================================
+// --- FIN FUNCIONES "EDITAR DATOS" ---
+// =========================================================
+
+
+/**
+ * Sube el certificado de aptitud desde la pantalla de "Adeuda".
+ */
+function submitAptitudManual() {
+  const fileInput = document.getElementById('aptitud-manual-upload');
+  const file = fileInput.files[0];
+  const dni = document.getElementById('dni-input').value;
+  const loader = document.getElementById('loader-aptitud');
+
+  // (PETICIÓN 1 - MODIFICADO)
+  if (!file) {
+    loader.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Tenes que adjuntar un certificado.</div>`;
+    loader.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-aptitud-manual');
+  btn.disabled = true;
+  loader.innerHTML = `<div class="spinner"></div><p>Subiendo...</p>`; // Reset loader
+  loader.style.display = 'block';
+
+  comprimirYLeerArchivo(file).then(fileData => {
+    google.script.run
+    .withSuccessHandler(function(response) {
+      loader.style.display = 'none';
+      if (response.status === 'OK') {
+        // (PETICIÓN 2 y 3 - MODIFICADO) No recargar, quitar texto de recarga
+        document.getElementById('aptitud-manual-seccion').innerHTML = `<div class="mensaje exito">${response.message}</div>`;
+        // Habilitar botón de finalizar
+        const btnFinalizar = document.getElementById('btn-finalizar-upload');
+        if (btnFinalizar) btnFinalizar.disabled = false;
+      } else {
+        alert("Error al subir: " + response.message);
+        btn.disabled = false;
+      }
+    })
+    .withFailureHandler(function(error) {
+      loader.style.display = 'none';
+      alert("Error de conexión: " + error.message);
+      btn.disabled = false;
+    })
+    .subirAptitudManual(dni, fileData);
+  }).catch(err => {
+    loader.style.display = 'none';
+    alert("Error al procesar archivo: " + err.message);
+    btn.disabled = false;
+  });
+}
+
+function handleComprobanteUploadFailure(error) {
+  // (CORRECCIÓN 2) Apuntar al loader correcto
+  document.getElementById('loader-comprobante').style.display = 'none';
+  const statusDiv = document.getElementById('status-validacion');
+  statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje error" style="margin-bottom:10px;">Error al subir: ${error.message}</div>`);
+
+  const fileInputComprobante = document.getElementById('comprobante-manual-upload');
+  const btnSubmitComprobante = document.getElementById('btn-submit-comprobante-manual');
+  const btnFinalizar = document.getElementById('btn-finalizar-upload');
+
+  if (btnSubmitComprobante) btnSubmitComprobante.disabled = false;
+  if (fileInputComprobante) fileInputComprobante.disabled = false;
+  if (btnFinalizar) btnFinalizar.disabled = false;
+}
+
+// =========================================================
+// --- ¡¡INICIO DE LA CORRECCIÓN (BUG CUOTAS + PETICIÓN 1/2/3)!! ---
+// =========================================================
+function handleComprobanteUploadSuccess(response) {
+  // (CORRECCIÓN 2) Apuntar al loader correcto
+  document.getElementById('loader-comprobante').style.display = 'none';
+  const statusDiv = document.getElementById('status-validacion');
+  
+  // (PETICIÓN 2) Reactivar botones en CUALQUIER caso de éxito o fallo
+  const fileInputComprobante = document.getElementById('comprobante-manual-upload');
+  const btnSubmitComprobante = document.getElementById('btn-submit-comprobante-manual');
+  const btnFinalizar = document.getElementById('btn-finalizar-upload');
+  
+  if (response.status === 'OK') {
+    let finalMessage = response.message;
+
+    // Si el pago está completo
+    if (response.estadoPago && (response.estadoPago === 'Pagado' || response.estadoPago.includes('Pagado'))) {
+      
+      // (PETICIÓN 1) Usa el mensaje final del servidor (ya tiene "Estimada familia...")
+      finalMessage = response.message; 
+      
+      // Ocultar el formulario de subida
+      if(document.getElementById('comprobante-manual-seccion')) {
+          document.getElementById('comprobante-manual-seccion').style.display = 'none';
+      }
+      // NO RECARGAR, mostrar el mensaje final.
+      statusDiv.innerHTML = `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>`;
+
+    } else {
+      // Si es una cuota (ej. C1 o C2), NO recargar.
+      // (PETICIÓN 2 y 3)
+      finalMessage += "<br>Puede subir otra cuota o finalizar.";
+      statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>`);
+
+      // Limpiar campos de subida para evitar doble-submit
+      const tipoComprobanteSelect = document.getElementById('tipo-comprobante-select');
+      const cuotaSelectorContainer = document.getElementById('cuota-selector-container');
+      const datosExternoContainer = document.getElementById('datos-externo-container');
+      const uploadFileContainer = document.getElementById('upload-file-container');
+      const btnClearComprobante = document.getElementById('btn-clear-comprobante');
+
+      if(fileInputComprobante) fileInputComprobante.value = '';
+      if(document.getElementById('comprobante-manual-name')) document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
+      if(tipoComprobanteSelect) tipoComprobanteSelect.value = '';
+      if (cuotaSelectorContainer) cuotaSelectorContainer.style.display = 'none';
+      if (datosExternoContainer) datosExternoContainer.style.display = 'none';
+      if (uploadFileContainer) uploadFileContainer.style.display = 'none';
+      if (btnClearComprobante) btnClearComprobante.style.display = 'none';
+      if (document.getElementById('externo-nombre-pagador')) document.getElementById('externo-nombre-pagador').value = '';
+      if (document.getElementById('externo-dni-pagador')) document.getElementById('externo-dni-pagador').value = '';
+    }
+    
+    // (PETICIÓN 2) Reactivar botones
+    if(btnSubmitComprobante) btnSubmitComprobante.disabled = false;
+    if(fileInputComprobante) fileInputComprobante.disabled = false;
+    if(btnFinalizar) btnFinalizar.disabled = false;
+    
+    return; // Detener la ejecución
+
+  } else {
+    // Si la subida falló (error lógico)
+    statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje error" style="margin-bottom:10px;">${response.message}</div>`);
+    // Reactivar botones
+    if(btnSubmitComprobante) btnSubmitComprobante.disabled = false;
+    if(fileInputComprobante) fileInputComprobante.disabled = false;
+    if(btnFinalizar) btnFinalizar.disabled = false;
+  }
+}
+// =========================================================
+// --- ¡¡FIN DE LA CORRECCIÓN!! ---
+// =========================================================
+
+
+function iniciarTemporizador(response) {
+  document.getElementById('timer-seccion').style.display = 'block';
+  document.getElementById('btn-validar').disabled = true;
+  let segundos = 8;
+  const countdown = document.getElementById('timer-countdown');
+  countdown.textContent = segundos;
+  const interval = setInterval(() => {
+    segundos--;
+    countdown.textContent = segundos;
+    if (segundos <= 0) {
+      clearInterval(interval);
+      mostrarFormulario(response);
+    }
+  }, 800);
+}
+
+function mostrarFormulario(response) {
+  document.getElementById('validacion-seccion').style.display = 'none';
+  document.getElementById('registro-seccion').style.display = 'block';
+
+  const esPreventa = response.datos && response.datos.esPreventa === true;
+
+  document.getElementById('dni').value = response.datos.dni;
+
+  if (response.datos) {
+    document.getElementById('email').value = response.datos.email || '';
+  }
+
+  if (response.datos) {
+    document.getElementById('nombre').value = response.datos.nombre || '';
+    document.getElementById('apellido').value = response.datos.apellido || '';
+    document.getElementById('fechaNacimiento').value = response.datos.fechaNacimiento || '';
+    document.getElementById('obraSocial').value = response.datos.obraSocial || '';
+    document.getElementById('colegioJardin').value = response.datos.colegioJardin || '';
+    document.getElementById('adultoResponsable1').value = response.datos.adultoResponsable1 || '';
+    document.getElementById('dniResponsable1').value = response.datos.dniResponsable1 || ''; 
+
+    if (response.datos.telResponsable1) {
+      const telMatch = String(response.datos.telResponsable1).match(/\(?(\d{2,5})\)?\s?(\d+)/);
+      if (telMatch) {
+        document.getElementById('telAreaResp1').value = telMatch[1] || '';
+        document.getElementById('telNumResp1').value = telMatch[2] || '';
+      }
+    }
+
+    document.getElementById('adultoResponsable2').value = response.datos.adultoResponsable2 || '';
+    if (response.datos.telResponsable2) {
+      const telMatch2 = String(response.datos.telResponsable2).match(/\(?(\d{2,5})\)?\s?(\d+)/);
+      if (telMatch2) {
+        document.getElementById('telAreaResp2').value = telMatch2[1] || '';
+        document.getElementById('telNumResp2').value = telMatch2[2] || '';
+      }
+    }
+
+    if (response.datos.personasAutorizadas) {
+      const autorizados = response.datos.personasAutorizadas.split(',');
+      const container = document.getElementById('autorizados-container');
+
+      container.innerHTML = '';
+
+      autorizados.forEach(aut => {
+        const autTrim = aut.trim();
+        if (autTrim) {
+          const match = autTrim.match(/(.*)\(DNI:\s?(\d+)\)/);
+          if (match) {
+            addAutorizadoCampos(match[1].trim(), match[2].trim());
+          } else {
+            addAutorizadoCampos(autTrim, '');
+          }
+        }
+      });
+    }
+
+    if (esPreventa) {
+      document.getElementById('jornada').value = response.datos.jornada || '';
+    }
+  }
+
+  if (response.jornadaExtendidaAlcanzada === true) {
+    const opcionExtendida = document.getElementById('opcion-jornada-extendida');
+    if (opcionExtendida) {
+      opcionExtendida.disabled = true;
+      opcionExtendida.textContent = "Jornada Extendida (SIN CUPO)";
+    }
+    const msgCupo = document.getElementById('jornada-cupo-msg');
+    if (msgCupo) {
+      msgCupo.style.display = 'inline';
+    }
+  }
+
+  // (Lógica de MP eliminada)
+  const opcionPagoTotal = document.querySelector('#metodoPago option[value="Pago 1 Cuota Deb/Cred MP(Total)"]');
+  if (opcionPagoTotal) {
+      opcionPagoTotal.style.display = 'none';
+      opcionPagoTotal.disabled = true;
+  }
+
+  if (esPreventa) {
+    const inputsParaBloquear = ['nombre', 'apellido', 'fechaNacimiento', 'email'];
+    inputsParaBloquear.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.readOnly = true;
+        el.classList.add('campo-bloqueado');
+        el.classList.add('form-cache'); 
+      }
+    });
+
+    const jornadaSelect = document.getElementById('jornada');
+    if (jornadaSelect) {
+      jornadaSelect.classList.add('form-cache'); 
+    }
+
+    document.getElementById('dni').classList.add('campo-bloqueado');
+    document.getElementById('dni').classList.add('form-cache');
+  }
+
+  if (document.querySelectorAll('.autorizado-nombre').length === 0) {
+    addAutorizadoCampos();
+  }
+
+  guardarFormEnCache();
+  calcularYMostrarEdad(); 
+
+  // (CORRECCIÓN) Se mueven los listeners al DOMContentLoaded
+
+  toggleEspecifique('practicaDeporte', 'especifiqueDeporte');
+  toggleEspecifique('tieneEnfermedad', 'especifiqueEnfermedad');
+  toggleEspecifique('esAlergico', 'especifiqueAlergia');
+
+  // (CORRECCIÓN) Se elimina esta llamada, ya no existe.
+  // toggleCantidadCuotas();
+  toggleTransferenciaInfo();
+  toggleCuotasInfo();
+}
+
+function comprimirYLeerArchivo(file) {
+  const MAX_WIDTH = 1024;
+  const QUALITY = 0.7;
+  const mimeType = file.type;
+
+  return new Promise((resolve, reject) => {
+    if (mimeType !== 'image/jpeg' && mimeType !== 'image/png') {
+      readFileAsBase64(file).then(data => {
+        resolve({ data, mimeType, fileName: file.name });
+      }).catch(reject);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_WIDTH) {
+            width *= MAX_WIDTH / height;
+            height = MAX_WIDTH;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedData = canvas.toDataURL('image/jpeg', QUALITY);
+        resolve({
+          data: compressedData,
+          mimeType: 'image/jpeg',
+          fileName: file.name.replace(/\.[^/.]+$/, "") + ".jpg"
+        });
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function manejarSubidaArchivo(inputElement, tipoArchivo, nombreLabelId, loaderId, urlHiddenId) {
+  const file = inputElement.files[0];
+  const nombreLabel = document.getElementById(nombreLabelId);
+  const loader = document.getElementById(loaderId);
+  const urlHidden = document.getElementById(urlHiddenId);
+  const dni = document.getElementById('dni').value;
+
+  urlHidden.value = '';
+  loader.style.display = 'none';
+  nombreLabel.textContent = 'Ningún archivo seleccionado';
+  if (!file) return;
+
+  if (!dni) {
+    alert("Error: No se puede subir un archivo si el DNI no está cargado en el formulario (Paso 2).");
+    inputElement.value = '';
+    return;
+  }
+
+  nombreLabel.textContent = file.name;
+  loader.className = 'loader-archivo';
+  loader.style.display = 'block';
+  loader.textContent = 'Iniciando...';
+
+  inputElement.disabled = true;
+  document.getElementById('submit-button').disabled = true;
+
+  loader.textContent = 'Preparando archivo (comprimiendo si es imagen)...';
+  comprimirYLeerArchivo(file).then(fileData => {
+    loader.textContent = 'Subiendo archivo...';
+    google.script.run
+    .withSuccessHandler(function(response) {
+      inputElement.disabled = false;
+      document.getElementById('submit-button').disabled = false;
+      if (response.status === 'OK') {
+        loader.className = 'loader-archivo exito';
+        loader.textContent =   '✅ Archivo subido con éxito.'  ;
+        urlHidden.value = response.url;
+      } else {
+        loader.className = 'loader-archivo error';
+        loader.textContent =   `❌ Error:   ${response.message}`;
+        inputElement.value = '';
+        nombreLabel.textContent = 'Ningún archivo seleccionado';
+      }
+    })
+    .withFailureHandler(function(error) {
+      inputElement.disabled = false;
+      document.getElementById('submit-button').disabled = false;
+      loader.className = 'loader-archivo error';
+      loader.textContent =   `❌ Error de conexión:   ${error.message}`;
+      inputElement.value = '';
+      nombreLabel.textContent = 'Ningún archivo seleccionado';
+    })
+    .subirArchivoIndividual(fileData, dni, tipoArchivo);
+  }).catch(err => {
+    inputElement.disabled = false;
+    document.getElementById('submit-button').disabled = false;
+    loader.className = 'loader-archivo error';
+    loader.textContent =   `❌ Error al procesar el archivo:   ${err.message}`;
+    inputElement.value = '';
+    nombreLabel.textContent = 'Ningún archivo seleccionado';
+  });
+}
+
+function calcularYMostrarEdad(fechaNacimientoStr, divId) {
+  let fechaNac = fechaNacimientoStr;
+  let divEdad = divId;
+
+  if (!fechaNacimientoStr || (fechaNacimientoStr && typeof fechaNacimientoStr === 'object')) { 
+    fechaNac = document.getElementById('fechaNacimiento').value;
+    divEdad = document.getElementById('edad-calculada');
+  }
+
+  if (!fechaNac) {
+    if (divEdad) divEdad.textContent = '';
+    return;
+  }
+
+  const fechaNacimiento = new Date(fechaNac);
+  const hoy = new Date();
+  fechaNacimiento.setMinutes(fechaNacimiento.getMinutes() + fechaNacimiento.getTimezoneOffset());
+  let anos = hoy.getFullYear() - fechaNacimiento.getFullYear();
+  let meses = hoy.getMonth() - fechaNacimiento.getMonth();
+  let dias = hoy.getDate() - fechaNacimiento.getDate();
+  if (dias < 0) {
+    meses--;
+    dias += new Date(hoy.getFullYear(), hoy.getMonth(), 0).getDate();
+  }
+  if (meses < 0) {
+    anos--;
+    meses += 12;
+  }
+  if (anos >= 0) {
+    if (divEdad) divEdad.textContent = `Edad actual: ${anos} años, ${meses} meses y ${dias} días.`;
+  } else {
+    if (divEdad) divEdad.textContent = '';
+  }
+}
+
+function toggleEspecifique(radioName, inputId) {
+  const radioChecked = document.querySelector(`input[name="${radioName}"]:checked`);
+  const inputField = document.getElementById(inputId);
+  if (radioChecked && radioChecked.value === 'Sí') {
+    inputField.style.display = 'block';
+    inputField.required = true; 
+  } else {
+    inputField.style.display = 'none';
+    inputField.value = '';
+    inputField.required = false;
+  }
+}
+
+// (ELIMINADO) 'toggleCantidadCuotas' ya no es necesario
+// function toggleCantidadCuotas() { ... }
+
+
+function toggleCuotasInfo() {
+  const metodoPago = document.getElementById('metodoPago').value;
+  const show = (metodoPago === 'Pago en Cuotas');
+
+  const containerAlias = document.getElementById('cuotas-transferencia-info');
+  if(containerAlias) containerAlias.style.display = show ? 'block' : 'none';
+}
+
+function toggleTransferenciaInfo() {
+  const metodoPago = document.getElementById('metodoPago').value;
+  const container = document.getElementById('transferencia-info');
+  container.style.display = (metodoPago === 'Transferencia') ? 'block' : 'none';
+}
+
+function removerFila(boton) {
+  boton.parentElement.remove();
+  guardarFormEnCache();
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function addAutorizadoCampos(nombre = '', dni = '') {
+  const container = document.getElementById('autorizados-container');
+  const div = document.createElement('div');
+  div.className = 'fila-dinamica';
+
+  const isRequired = (container.children.length === 0) ? 'required' : '';
+
+  div.innerHTML = `
+  <div class="campos-dinamicos">
+  <input type="text" class="autorizado-nombre form-cache" placeholder="Nombre y Apellido (Relación)" value="${nombre}" ${isRequired}>
+  <input type="tel" class="autorizado-dni form-cache" placeholder="DNI (8 dígitos)" maxlength="8" pattern="[0-9]{8}" inputmode="numeric" value="${dni}" ${isRequired} title="El DNI debe tener exactamente 8 dígitos numéricos.">
+  </div>
+  <button type="button" class="btn-remover" onclick="removerFila(this)">X</button>
+  `;
+  container.appendChild(div);
+}
+
+/**
+ * (*** ESTA ES LA FUNCIÓN CRÍTICA CORREGIDA ***)
+ * (1) BUG CORREGIDO: Se agregan TODAS las clases (hermano-nombre, hermano-obrasocial, etc.)
+ * a los inputs, independientemente de si son 'readonly' o no.
+ */
+function addHermanoCampos(data = {}) {
+  const container = document.getElementById('hermanos-container');
+  const div = document.createElement('div');
+  div.className = 'fila-dinamica';
+  const uniqueId = 'hermano_edad_' + container.children.length;
+
+  // --- (INICIO DE CORRECCIÓN DE BUG) ---
+  const dni = data.dni || '';
+  const nombre = data.nombre || '';
+  const apellido = data.apellido || '';
+  const obraSocial = data.obraSocial || '';
+  const colegio = data.colegio || '';
+  const fechaNac = data.fechaNacimiento || '';
+
+  // Clases base que SIEMPRE deben estar
+  const claseNombre = 'hermano-nombre form-cache';
+  const claseApellido = 'hermano-apellido form-cache';
+  const claseObraSocial = 'hermano-obrasocial form-cache';
+  const claseColegio = 'hermano-colegio form-cache';
+  const claseFechaNac = 'hermano-fechanac form-cache';
+
+  // Determinar si los campos deben ser readonly
+  const propsNombre = nombre ? `readonly class="campo-bloqueado ${claseNombre}"` : `class="${claseNombre}"`;
+  const propsApellido = apellido ? `readonly class="campo-bloqueado ${claseApellido}"` : `class="${claseApellido}"`;
+  const propsFechaNac = fechaNac ? `readonly class="campo-bloqueado ${claseFechaNac}"` : `class="${claseFechaNac}"`;
+
+  div.innerHTML = `
+  <div class="hermano-campos">
+  <input type="text" ${propsNombre} placeholder="Nombre Hermano/a" value="${nombre}" required>
+  <input type="text" ${propsApellido} placeholder="Apellido Hermano/a" value="${apellido}" required>
+
+  <input type="text" class="${claseObraSocial}" placeholder="Obra Social Hermano/a" value="${obraSocial}" required>
+  <input type="text" class="${claseColegio}" placeholder="Colegio/Jardín Hermano/a" value="${colegio}" required>
+
+  <input type="tel" readonly class="campo-bloqueado form-cache hermano-dni" placeholder="DNI Hermano/a (8 dígitos)" value="${dni}" maxlength="8" pattern="[0-9]{8}" inputmode="numeric" required title="El DNI debe tener exactamente 8 dígitos numéricos.">
+  
+  <input type="date" ${propsFechaNac} value="${fechaNac}" required oninput="calcularYMostrarEdad(this.value, '${uniqueId}')" min="2010-01-01" max="2023-12-31">
+
+  <div class="hermano-dni-error" style="color: red; font-size: 0.85em; grid-column: 1 / 2; margin-top: -10px; min-height: 1.2em;"></div>
+  <div class="hermano-fecha-error" style="color: red; font-size: 0.85em; grid-column: 2 / 3; margin-top: -10px; min-height: 1.2em;"></div>
+
+  <div id="${uniqueId}" class="edad-calculada" style="grid-column: 1 / -1; font-size: 0.9em; margin-top: 5px; margin-left: 5px;"></div>
+  </div>
+  <button type="button" class="btn-remover" onclick="removerFila(this)">X</button>
+  `;
+  // --- (FIN DE CORRECCIÓN DE BUG) ---
+  container.appendChild(div);
+
+  // Calcular edad si la fecha vino
+  if (fechaNac) {
+    calcularYMostrarEdad(fechaNac, document.getElementById(uniqueId));
+  }
+}
+
+function guardarFormEnCache() {
+  try {
+    const data = {};
+    document.querySelectorAll('.form-cache').forEach(el => {
+      const key = el.id || el.name;
+      if (!key) return; 
+
+      if (el.disabled) {
+        return;
+      }
+      
+      // (MODIFICADO) Esta lógica es más simple: si es readonly pero NO es del formulario
+      // principal (como nombre, dni, etc. de pre-venta), igual lo guardamos.
+      if (el.readOnly && !el.id) {
+         // Esto ahora captura correctamente los campos de hermano readonly
+         data[key] = el.value;
+      }
+
+      if (el.readOnly && el.id) { // Captura los campos de pre-venta (nombre, dni, etc.)
+        data[key] = el.value;
+        return;
+      }
+
+
+      if (el.type === 'radio') {
+        if (el.checked) {
+          data[el.name] = el.value;
+        }
+      } else if (!el.readOnly) { // Solo guarda los no-readonly (evita duplicados)
+        data[key] = el.value;
+      }
+    });
+
+    data.autorizados = [];
+    const nombresAut = document.querySelectorAll('.autorizado-nombre');
+    const dnisAut = document.querySelectorAll('.autorizado-dni');
+    for (let i = 0; i < dnisAut.length; i++) {
+      if (nombresAut[i].value || dnisAut[i].value) { 
+        data.autorizados.push({ n: nombresAut[i].value, d: dnisAut[i].value });
+      }
+    }
+
+    // (MODIFICADO) Ahora que los selectores están BIEN, esto es más seguro.
+    data.hermanos = [];
+    const nombresHermano = document.querySelectorAll('.hermano-nombre');
+    const apellidosHermano = document.querySelectorAll('.hermano-apellido');
+    const obrasSocialesHermano = document.querySelectorAll('.hermano-obrasocial');
+    const colegiosHermano = document.querySelectorAll('.hermano-colegio');
+    const dnisHermano = document.querySelectorAll('.hermano-dni');
+    const fechasNacHermano = document.querySelectorAll('.hermano-fechanac');
+    
+    // Usamos dnisHermano.length como la fuente de verdad.
+    for (let i = 0; i < dnisHermano.length; i++) {
+        // Si el selector fallara (que ya no debería), esto previene el error.
+        data.hermanos.push({
+          n: (nombresHermano[i] ? nombresHermano[i].value : ''),
+          a: (apellidosHermano[i] ? apellidosHermano[i].value : ''),
+          os: (obrasSocialesHermano[i] ? obrasSocialesHermano[i].value : ''),
+          c: (colegiosHermano[i] ? colegiosHermano[i].value : ''),
+          d: (dnisHermano[i] ? dnisHermano[i].value : ''),
+          f: (fechasNacHermano[i] ? fechasNacHermano[i].value : '')
+        });
+    }
+
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+
+  } catch (e) {
+    console.warn("No se pudo guardar el caché del formulario: ", e);
+  }
+}
+
+function cargarFormDesdeCache() {
+  try {
+    const data = JSON.parse(localStorage.getItem(CACHE_KEY));
+    if (!data) return;
+
+    document.querySelectorAll('.form-cache').forEach(el => {
+      const key = el.id || el.name;
+      if (!key) return;
+
+      if (data[key] !== undefined) {
+        if (el.type === 'radio') {
+          el.checked = (el.value === data[key]);
+        } else {
+          el.value = data[key];
+        }
+      }
+    });
+
+    if (data.autorizados && data.autorizados.length > 0) {
+      const autContainer = document.getElementById('autorizados-container');
+      autContainer.innerHTML = '';
+      data.autorizados.forEach(aut => {
+        addAutorizadoCampos(aut.n || '', aut.d || '');
+      });
+    }
+
+    if (data.hermanos && data.hermanos.length > 0) {
+      const hermContainer = document.getElementById('hermanos-container');
+      hermContainer.innerHTML = '';
+      
+      // --- (INICIO DE MODIFICACIÓN) ---
+      // Se llama a addHermanoCampos con los datos cacheados
+      data.hermanos.forEach(herm => {
+        addHermanoCampos({
+          dni: herm.d || '',
+          nombre: herm.n || '',
+          apellido: herm.a || '',
+          obraSocial: herm.os || '',
+          colegio: herm.c || '',
+          fechaNacimiento: herm.f || ''
+        });
+      });
+      // --- (FIN DE MODIFICACIÓN) ---
+    }
+
+    calcularYMostrarEdad();
+
+    toggleTransferenciaInfo();
+    toggleCuotasInfo(); // Añadido para restaurar estado
+
+  } catch (e) {
+    console.warn("No se pudo cargar el caché del formulario: ", e);
+  }
+}
+
+function limpiarCache() {
+  localStorage.removeItem(CACHE_KEY);
+  localStorage.removeItem('pendingSiblings'); // (NUEVO) Limpia también el caché de hermanos
+}
+
+// (CORRECCIÓN) Se elimina el DOMContentLoaded de aquí, ya que irá en Eventos.html
+</script>
