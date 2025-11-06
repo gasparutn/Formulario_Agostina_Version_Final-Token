@@ -14,9 +14,6 @@ let datosEdicionGlobales = null;
 // DEFINICIONES DE FUNCIONES DE RESPUESTA (HANDLERS)
 // =========================================================
 
-/**
- * Handler para fallo de PASO 1 (Registro)
- */
 function handleRegistroFailure(error) {
   document.getElementById('submit-button').disabled = false;
   document.getElementById('loader-registro').style.display = 'none';
@@ -24,31 +21,22 @@ function handleRegistroFailure(error) {
   document.getElementById('status-registro').innerHTML = `<div class="mensaje error"><strong>Error al Registrar:</strong> ${errorMessage}</div>`;
 }
 
-/**
- * Handler para éxito de PASO 1. Llama a PASO 2.
- */
 function handlePaso1Success(response) {
   if (response.status === 'OK_REGISTRO') {
     document.getElementById('loader-registro').querySelector('p').textContent = 'Finalizando registro...';
-    
     google.script.run
-      .withSuccessHandler(handlePagoSuccess) // Handler de éxito de Paso 2
-      .withFailureHandler(handlePagoFailure) // Handler de fallo de Paso 2
+      .withSuccessHandler(handlePagoSuccess)
+      .withFailureHandler(handlePagoFailure)
       .paso2_procesarPostRegistro(response.datos, response.numeroDeTurno, response.hermanosRegistrados);
-
   } else {
     handleRegistroFailure(response);
   }
 }
 
-/**
- * Handler para éxito de PASO 2 (Creación de Pago)
- */
 function handlePagoSuccess(response) {
   document.getElementById('registroForm').style.display = 'none';
   document.getElementById('loader-registro').style.display = 'none';
   const statusDiv = document.getElementById('status-registro');
-
   const dniJustRegistered = response.dniRegistrado;
   let listFromCache = JSON.parse(localStorage.getItem('pendingSiblings') || 'null');
   let listToDisplay = [];
@@ -56,9 +44,7 @@ function handlePagoSuccess(response) {
 
   if (listFromCache) {
     listToDisplay = listFromCache.filter(h => h.dni !== dniJustRegistered);
-    if (listToDisplay.length === 0) {
-      isFinalRegistration = true;
-    }
+    if (listToDisplay.length === 0) isFinalRegistration = true;
   } else if (response.hermanos && response.hermanos.length > 0) {
     listToDisplay = response.hermanos;
   }
@@ -79,56 +65,35 @@ function handlePagoSuccess(response) {
   }
 
   if (response && (response.status === 'OK_EFECTIVO' || response.status === 'OK_REGISTRO_SIN_PAGO')) {
-    statusDiv.innerHTML = `
-    <div class="mensaje exito">${response.message}</div>
-    ${htmlHermanos}
-    <button type="button" id="btn-volver-form-limpio" class="btn-final-volver" style="margin-top: 20px;">Volver a Iniciar (Formulario Limpio)</button>
-    `;
-
+    statusDiv.innerHTML = `<div class="mensaje exito">${response.message}</div>${htmlHermanos}<button type="button" id="btn-volver-form-limpio" class="btn-final-volver" style="margin-top: 20px;">Volver a Iniciar (Formulario Limpio)</button>`;
   } else {
     const errorMessage = response.message || 'Ocurrió un error desconocido en el paso 2.';
-    statusDiv.innerHTML = `<div class="mensaje error"><strong>Error:</strong> ${errorMessage}</div>
-    ${htmlHermanos}
-    <button type="button" id="btn-volver-form-limpio" class="btn-final-volver" style="margin-top: 20px;">Volver a Iniciar (Formulario Limpio)</button>
-    `;
+    statusDiv.innerHTML = `<div class="mensaje error"><strong>Error:</strong> ${errorMessage}</div>${htmlHermanos}<button type="button" id="btn-volver-form-limpio" class="btn-final-volver" style="margin-top: 20px;">Volver a Iniciar (Formulario Limpio)</button>`;
   }
 
   if (document.getElementById('btn-volver-form-limpio')) {
-    document.getElementById('btn-volver-form-limpio').addEventListener('click', function() {
-      limpiarCache(); 
+    document.getElementById('btn-volver-form-limpio').addEventListener('click', () => {
+      limpiarCache();
       window.top.location.href = APP_URL;
     });
   }
 
   document.querySelectorAll('.btn-completar-hermano').forEach(btn => {
     btn.addEventListener('click', function() {
-      const dni = this.dataset.dni;
-      const tipo = this.dataset.tipo;
-      localStorage.setItem('autoValidateDNI', dni);
-      localStorage.setItem('autoValidateType', tipo);
+      localStorage.setItem('autoValidateDNI', this.dataset.dni);
+      localStorage.setItem('autoValidateType', this.dataset.tipo);
       window.top.location.href = APP_URL;
     });
   });
 }
 
-
-/**
- * Handler para fallo de PASO 2 (Creación de Pago)
- */
 function handlePagoFailure(error) {
   document.getElementById('submit-button').disabled = false;
   document.getElementById('loader-registro').style.display = 'none';
   const errorMessage = error.message || error;
-  document.getElementById('status-registro').innerHTML = `<div class="mensaje aviso">
-  <strong>¡¡REGISTRO GUARDADO!!</strong><br>
-  Pero ocurrió un error al finalizar el registro: ${errorMessage}.
-  <br>Por favor, contacte a la administración con su número de turno si el problema persiste.
-  </div>`;
+  document.getElementById('status-registro').innerHTML = `<div class="mensaje aviso"><strong>¡¡REGISTRO GUARDADO!!</strong><br>Pero ocurrió un error al finalizar el registro: ${errorMessage}.<br>Por favor, contacte a la administración con su número de turno si el problema persiste.</div>`;
 }
 
-/**
- * Handler para éxito de validación de Hermano
- */
 function handleValidacionHermanoSuccess(response) {
   document.getElementById('loader-hermano-modal').style.display = 'none';
   const btnValidar = document.getElementById('btn-modal-validar-hermano');
@@ -138,71 +103,47 @@ function handleValidacionHermanoSuccess(response) {
 
   if (response.status.startsWith('OK_')) {
     statusDiv.innerHTML = `<div class="mensaje exito">${response.message}</div>`;
-    addHermanoCampos(response.datos); // Llama a la función que está en js2.html
-    guardarFormEnCache(); // Llama a la función que está en js2.html
-    
+    addHermanoCampos(response.datos);
+    guardarFormEnCache();
     setTimeout(() => {
       document.getElementById('hermano-modal-backdrop').style.display = 'none';
-      statusDiv.innerHTML = ''; 
-      document.getElementById('hermano-modal-dni').value = ''; 
-    }, 3500); 
-
+      statusDiv.innerHTML = '';
+      document.getElementById('hermano-modal-dni').value = '';
+    }, 3500);
   } else {
     statusDiv.innerHTML = `<div class="mensaje error">${response.message}</div>`;
   }
 }
 
-/**
- * Handler para fallo de validación de Hermano
- */
 function handleValidacionHermanoFailure(error) {
   document.getElementById('loader-hermano-modal').style.display = 'none';
   const btnValidar = document.getElementById('btn-modal-validar-hermano');
   btnValidar.disabled = false;
   btnValidar.textContent = 'Validar DNI';
-  
-  const statusDiv = document.getElementById('status-hermano-modal');
-  statusDiv.innerHTML = `<div class="mensaje error">Error de conexión: ${error.message}</div>`;
+  document.getElementById('status-hermano-modal').innerHTML = `<div class="mensaje error">Error de conexión: ${error.message}</div>`;
 }
 
-
-/**
- * Handler principal para éxito de Validación de DNI (Paso 1)
- */
 function handleValidationSuccess(response) {
   document.getElementById('btn-validar').disabled = false;
   document.getElementById('loader-validacion').style.display = 'none';
   const statusDiv = document.getElementById('status-validacion');
-
   const pagoTotalMPVisible = (response.pagoTotalMPVisible === true);
-  
-  if (response.datos) {
-    datosEdicionGlobales = response.datos;
-  }
+  if (response.datos) datosEdicionGlobales = response.datos;
 
   if (response.status === 'HERMANO_COMPLETAR') {
     statusDiv.innerHTML = `<div class="mensaje aviso" style="text-align: left;">${response.message}</div>`;
     document.getElementById('esHermanoCompletando').value = "true";
-    const seccionHermanos = document.getElementById('seccion-hermanos');
-    if (seccionHermanos) seccionHermanos.style.display = 'none';
-    iniciarTemporizador(response); 
-
+    if (document.getElementById('seccion-hermanos')) document.getElementById('seccion-hermanos').style.display = 'none';
+    iniciarTemporizador(response);
   } else if (response.status === 'OK_PREVENTA' || response.status === 'OK' || response.status === 'OK_NUEVO') {
     document.getElementById('esHermanoCompletando').value = "false";
-    const seccionHermanos = document.getElementById('seccion-hermanos');
-    if (seccionHermanos) {
-      seccionHermanos.style.display = 'block';
-    }
+    if (document.getElementById('seccion-hermanos')) document.getElementById('seccion-hermanos').style.display = 'block';
     iniciarTemporizador(response);
-
   } else if (response.status === 'REGISTRO_ENCONTRADO') {
-
     let html = '';
-    const proximaCuotaMsg = response.proximaCuotaPendiente && !response.message.includes('PAGADO')
-      ? `<br><strong>Próxima Cuota Pendiente: ${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.`
-      : '';
+    const proximaCuotaMsg = response.proximaCuotaPendiente && !response.message.includes('PAGADO') ? `<br><strong>Próxima Cuota Pendiente: ${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.` : '';
 
-    if (response.message.includes('PAGADA') || response.message.includes('PAGADO')) {
+    if (response.message.includes('PAGADA') || response.message.includes('PAGADO') || response.message.includes('Pago Total')) {
       html += `<div class="mensaje exito" style="margin-bottom:10px; text-align:left;"><strong>${response.message}</strong></div>`;
     } else {
       let msgPago = response.message_pago ? `<br>${response.message_pago}` : '';
@@ -210,199 +151,56 @@ function handleValidationSuccess(response) {
     }
 
     if (response.adeudaAptitud === true) {
-      html += `
-      <div id="aptitud-manual-seccion" style="margin-top: 15px; padding: 10px; border: 1px solid #e67e22; border-radius: 5px; background: #fdf5e6;">
-      <h3 style="background-color: #e67e22; color: white; padding: 10px;">¡Atención!</h3>
-      <p style="text-align: center; font-weight: bold; color: #e67e22;">Adeuda Certificado de Aptitud Física</p>
-      <p>Por favor, suba el certificado para completar la ficha.</p>
-      <label for="aptitud-manual-upload" class="file-input-label" style="background-color: #e67e22;">Seleccionar Certificado</label>
-      <input type="file" id="aptitud-manual-upload" accept="image/jpeg, image/png, application/pdf">
-      <span id="aptitud-manual-name" class="file-name">Ningún archivo seleccionado</span>
-      <button type="button" id="btn-submit-aptitud-manual" style="background-color: #e67e22; width: 100%; height:45px">Subir Certificado!!!</button>
-      <div class="loader" id="loader-aptitud" style="display: none;"><div class="spinner"></div><p>Subiendo...</p></div>
-      </div>`;
+      html += `<div id="aptitud-manual-seccion" style="margin-top: 15px; padding: 10px; border: 1px solid #e67e22; border-radius: 5px; background: #fdf5e6;"><h3>¡Atención!</h3><p style="text-align: center; font-weight: bold; color: #e67e22;">Adeuda Certificado de Aptitud Física</p><p>Por favor, suba el certificado para completar la ficha.</p><label for="aptitud-manual-upload" class="file-input-label" style="background-color: #e67e22;">Seleccionar Certificado</label><input type="file" id="aptitud-manual-upload" accept="image/jpeg, image/png, application/pdf"><span id="aptitud-manual-name" class="file-name">Ningún archivo seleccionado</span><button type="button" id="btn-submit-aptitud-manual" style="background-color: #e67e22; width: 100%; height:45px">Subir Certificado!!!</button><div class="loader" id="loader-aptitud" style="display: none;"><div class="spinner"></div><p>Subiendo...</p></div></div>`;
     }
-    
-    // --- (INICIO MODIFICACIÓN) ---
-    // Este bloque ahora contiene el HTML de la casilla de verificación familiar
-    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA')) {
-      html += `
-      <div id="comprobante-manual-seccion" style="margin-top: 15px; border: 1px solid var(--color-principal); padding: 15px; border-radius: 5px;">
-      <h3>Subir un comprobante (Cuota, Transferencia, etc.):</h3>
-      `;
 
+    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA') && !response.message.includes('Pago Total')) {
+      html += `<div id="comprobante-manual-seccion" style="margin-top: 15px; border: 1px solid var(--color-principal); padding: 15px; border-radius: 5px;"><h3>Subir un comprobante (Cuota, Transferencia, etc.):</h3>`;
       if (response.metodoPago === 'Pago en Cuotas' && response.proximaCuotaPendiente) {
-         html += `<div class="mensaje-cuota">Está por subir un comprobante para la <strong>${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.</div>`;
+        html += `<div class="mensaje-cuota">Está por subir un comprobante para la <strong>${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.</div>`;
       }
-
-      html += `
-      <label for="tipo-comprobante-select">Seleccione el tipo de comprobante:</label>
-      <select id="tipo-comprobante-select">
-        <option value="">-- Elija una opción --</option>
-        <option value="mp_total" style="display: ${pagoTotalMPVisible ? 'block' : 'none'};">a) Comprobante 1 pago Mercado Pago Monto Total</option>
-        <option value="mp_cuotas_group" style="display: ${response.metodoPago === 'Pago en Cuotas' ? 'block' : 'none'};">b) Comprobante Pagos 3 cuotas</option>
-        <option value="externo" style="display: ${response.metodoPago !== 'Pago en Cuotas' ? 'block' : 'none'};">c) Comprobante Externo (Transferencia, etc.)</option>
-      </select>
-
-      <div id="cuota-selector-container" style="display: none; margin-top: 10px;">
-        <label for="cuota-selector">Seleccione la Cuota a la que corresponde el comprobante:</label>
-        <select id="cuota-selector">
-          <option value="">-- Seleccione Cuota --</option>
-          <option value="mp_cuota_1">b.1) Comprobante Cuota 1</option>
-          <option value="mp_cuota_2">b.2) Comprobante Cuota 2</option>
-          <option value="mp_cuota_3">b.3) Comprobante Cuota 3</option>
-          <option value="mp_cuota_total">b.4) Comprobante Cancelación total (Paga las 3 juntas)</option>
-        </select>
-      </div>
-      `;
-
-      html += `
-      <div id="datos-externo-container">
-      <label for="externo-nombre-pagador">Nombre y Apellido (del Adulto Pagador):</label>
-      <input type="text" id="externo-nombre-pagador" placeholder="Nombre Apellido (Quien paga)">
-      <label for="externo-dni-pagador">DNI (del Adulto Pagador):</label>
-      <input type="tel" id="externo-dni-pagador" placeholder="DNI (Quien paga)" pattern="[0-9]{8}" inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos.">
-      
-      <div id="pago-familiar-container" style="display: none;"> <input type="checkbox" id="es-pago-familiar-check">
-        <label for="es-pago-familiar-check">¿Este pago total cubre a toda la familia (hermanos/as)?</label>
-      </div>
-
-      </div>
-
-      <div id="upload-file-container">
-      <label for="comprobante-manual-upload" class="file-input-label" style="background-color: #7f8c8d;">Seleccionar Archivo para Subir</label>
-      <input type="file" id="comprobante-manual-upload" accept="image/jpeg, image/png, application/pdf">
-      <div style="display: flex; align-items: center; margin-bottom: 15px;">
-      <span id="comprobante-manual-name" class="file-name" style="margin-bottom: 0;">Ningún archivo seleccionado</span>
-      <button type="button" id="btn-clear-comprobante" class="btn-remover" style="display:none; margin-top: 0; margin-left: 10px;">X</button>
-      </div>
-      <button type="button" id="btn-submit-comprobante-manual">Subir Comprobante</button>
-      
-      <div class="loader" id="loader-comprobante" style="display: none; margin-top: 15px;"><div class="spinner"></div><p>Subiendo comprobante...</p></div>
-      
-      </div>
-
-      <hr style="margin-top:20px;">
-      <button type="button" id="btn-finalizar-upload" class="btn-final-volver">Finalizar Carga (Volver)</button>
-      </div>
-      `;
+      html += `<label for="tipo-comprobante-select">Seleccione el tipo de comprobante:</label><select id="tipo-comprobante-select"><option value="">-- Elija una opción --</option><option value="mp_total" style="display: ${pagoTotalMPVisible ? 'block' : 'none'};">a) Comprobante 1 pago Mercado Pago Monto Total</option><option value="mp_cuotas_group" style="display: ${response.metodoPago === 'Pago en Cuotas' ? 'block' : 'none'};">b) Comprobante Pagos 3 cuotas</option><option value="externo" style="display: ${response.metodoPago !== 'Pago en Cuotas' ? 'block' : 'none'};">c) Comprobante Externo (Transferencia, etc.)</option></select><div id="cuota-selector-container" style="display: none; margin-top: 10px;"><label>Seleccione la/s cuota/s que pagó con este comprobante:</label><div class="cuota-checkbox-container"><div class="cuota-checkbox-item"><input type="checkbox" id="cuota-check-1" value="mp_cuota_1"><label for="cuota-check-1">b.1) Comprobante Cuota 1</label></div><div class="cuota-checkbox-item"><input type="checkbox" id="cuota-check-2" value="mp_cuota_2"><label for="cuota-check-2">b.2) Comprobante Cuota 2</label></div><div class="cuota-checkbox-item"><input type="checkbox" id="cuota-check-3" value="mp_cuota_3"><label for="cuota-check-3">b.3) Comprobante Cuota 3</label></div></div></div><div id="datos-externo-container"><label for="externo-nombre-pagador">Nombre y Apellido (del Adulto Pagador):</label><input type="text" id="externo-nombre-pagador" placeholder="Nombre Apellido (Quien paga)"><label for="externo-dni-pagador">DNI (del Adulto Pagador):</label><input type="tel" id="externo-dni-pagador" placeholder="DNI (Quien paga)" pattern="[0-9]{8}" inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos."><div id="pago-familiar-container" style="display: none;"><input type="checkbox" id="es-pago-familiar-check"><label for="es-pago-familiar-check">Tilde la opción si el comprobante elegido incluye a los/as (hermanos/as)?</label></div></div><div id="upload-file-container"><label for="comprobante-manual-upload" class="file-input-label" style="background-color: #7f8c8d;">Seleccionar Archivo para Subir</label><input type="file" id="comprobante-manual-upload" accept="image/jpeg, image/png, application/pdf"><div style="display: flex; align-items: center; margin-bottom: 15px;"><span id="comprobante-manual-name" class="file-name" style="margin-bottom: 0;">Ningún archivo seleccionado</span><button type="button" id="btn-clear-comprobante" class="btn-remover" style="display:none; margin-top: 0; margin-left: 10px;">X</button></div><button type="button" id="btn-submit-comprobante-manual">Subir Comprobante</button><div class="loader" id="loader-comprobante" style="display: none; margin-top: 15px;"><div class="spinner"></div><p>Subiendo comprobante...</p></div></div><hr style="margin-top:20px;"><button type="button" id="btn-finalizar-upload" class="btn-final-volver">Finalizar Carga (Volver)</button></div>`;
     } else {
-    // --- (FIN MODIFICACIÓN) ---
       if (response.adeudaAptitud !== true) {
         html += `<button type="button" id="btn-finalizar-upload" class="btn-final-volver">Volver al Inicio</button>`;
       }
     }
 
-    html += `
-    <div id="editar-info-seccion" style="margin-top: 20px;">
-      <button type="button" id="btn-mostrar-editar" class="btn-editar">Editar Datos de Contacto / Autorizados</button>
-      <div id="editar-form-container" style="display: none; border: 2px dashed #007bff; padding: 15px; margin-top: 10px; background: #f8f9fa;">
-        <h3>Editando Datos</h3>
-        <p>Modifique solo los campos necesarios. Los campos de DNI e Email del inscripto no se pueden cambiar.</p>
-        
-        <label for="edit-dni">DNI Inscripto (Bloqueado)</label>
-        <input type="text" id="edit-dni" readonly class="campo-bloqueado">
-        
-        <label for="edit-email">Email (Bloqueado)</label>
-        <input type="email" id="edit-email" readonly class="campo-bloqueado">
-        
-        <label for="edit-adultoResponsable1">Adulto Responsable 1</label>
-        <input type="text" id="edit-adultoResponsable1" class="form-cache">
-        
-        <label for="edit-dniResponsable1">DNI Responsable 1</label>
-        <input type="tel" id="edit-dniResponsable1" class="form-cache" maxlength="8" pattern="[0-9]{8}">
-        
-        <label for="edit-telResp1">Tel. Responsable 1 (Ej: (261) 5123456)</label>
-        <input type="tel" id="edit-telResp1" class="form-cache">
-        
-        <label for="edit-adultoResponsable2">Adulto Responsable 2 (Opcional)</label>
-        <input type="text" id="edit-adultoResponsable2" class="form-cache">
-        
-        <label for="edit-telResp2">Tel. Responsable 2 (Opcional)</label>
-        <input type="tel" id="edit-telResp2" class="form-cache">
-        
-        <label>Personas Autorizadas (Edite la lista completa)</label>
-        <div id="edit-autorizados-container">
-          </div>
-        <button type="button" id="btn-edit-add-autorizado" class="btn-dinamico" style="width: auto;">+ Agregar Autorizado</button>
-        
-        <label for="edit-aptitud-upload" style="margin-top: 15px;">Reemplazar Certificado de Aptitud (Opcional)</label>
-        <p style="font-size: 0.9em; margin-bottom: 10px;">(Solo seleccione un archivo si desea reemplazar el existente o subir uno nuevo).</p>
-        <input type="file" id="edit-aptitud-upload" accept="image/jpeg, image/png, application/pdf">
-        <label for="edit-aptitud-upload" class="file-input-label">Seleccionar Nuevo Certificado</label>
-        <span id="edit-aptitud-name" class="file-name">Ningún archivo seleccionado</span>
-        <div class="loader-archivo" id="loader-edit-aptitud"></div>
-        <input type="hidden" id="edit-urlCertificadoAptitud">
-
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-           <button type="button" id="btn-guardar-cambios" class="btn-guardar" style="width: 50%;">Guardar Cambios</button>
-           <button type="button" id="btn-cancelar-edicion" class="btn-cancelar" style="width: 50%;">Cancelar</button>
-        </div>
-      </div>
-    </div>
-    `;
+    html += `<div id="editar-info-seccion" style="margin-top: 20px;"><button type="button" id="btn-mostrar-editar" class="btn-editar">Editar Datos de Contacto / Autorizados</button><div id="editar-form-container" style="display: none; border: 2px dashed #007bff; padding: 15px; margin-top: 10px; background: #f8f9fa;"><h3>Editando Datos</h3><p>Modifique solo los campos necesarios. Los campos de DNI e Email del inscripto no se pueden cambiar.</p><label for="edit-dni">DNI Inscripto (Bloqueado)</label><input type="text" id="edit-dni" readonly class="campo-bloqueado"><label for="edit-email">Email (Bloqueado)</label><input type="email" id="edit-email" readonly class="campo-bloqueado"><label for="edit-adultoResponsable1">Adulto Responsable 1</label><input type="text" id="edit-adultoResponsable1" class="form-cache"><label for="edit-dniResponsable1">DNI Responsable 1</label><input type="tel" id="edit-dniResponsable1" class="form-cache" maxlength="8" pattern="[0-9]{8}"><label for="edit-telResp1">Tel. Responsable 1 (Ej: (261) 5123456)</label><input type="tel" id="edit-telResp1" class="form-cache"><label for="edit-adultoResponsable2">Adulto Responsable 2 (Opcional)</label><input type="text" id="edit-adultoResponsable2" class="form-cache"><label for="edit-telResp2">Tel. Responsable 2 (Opcional)</label><input type="tel" id="edit-telResp2" class="form-cache"><label>Personas Autorizadas (Edite la lista completa)</label><div id="edit-autorizados-container"></div><button type="button" id="btn-edit-add-autorizado" class="btn-dinamico" style="width: auto;">+ Agregar Autorizado</button><label for="edit-aptitud-upload" style="margin-top: 15px;">Reemplazar Certificado de Aptitud (Opcional)</label><p style="font-size: 0.9em; margin-bottom: 10px;">(Solo seleccione un archivo si desea reemplazar el existente o subir uno nuevo).</p><input type="file" id="edit-aptitud-upload" accept="image/jpeg, image/png, application/pdf"><label for="edit-aptitud-upload" class="file-input-label">Seleccionar Nuevo Certificado</label><span id="edit-aptitud-name" class="file-name">Ningún archivo seleccionado</span><div class="loader-archivo" id="loader-edit-aptitud"></div><input type="hidden" id="edit-urlCertificadoAptitud"><div style="display: flex; gap: 10px; margin-top: 20px;"><button type="button" id="btn-guardar-cambios" class="btn-guardar" style="width: 50%;">Guardar Cambios</button><button type="button" id="btn-cancelar-edicion" class="btn-cancelar" style="width: 50%;">Cancelar</button></div></div></div>`;
 
     statusDiv.innerHTML = html;
 
     if (response.adeudaAptitud === true) {
-      document.getElementById('aptitud-manual-upload').addEventListener('change', function() {
-        document.getElementById('aptitud-manual-name').textContent = this.files[0] ? this.files[0].name : 'Ningún archivo seleccionado';
-      });
+      document.getElementById('aptitud-manual-upload').addEventListener('change', function() { document.getElementById('aptitud-manual-name').textContent = this.files[0] ? this.files[0].name : 'Ningún archivo seleccionado'; });
       document.getElementById('btn-submit-aptitud-manual').addEventListener('click', submitAptitudManual);
     }
 
-    // --- (INICIO MODIFICACIÓN) ---
-    // Este bloque ahora contiene los listeners para la casilla de pago familiar
-    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA')) { 
+    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA') && !response.message.includes('Pago Total')) {
       const cuotaSelectorContainer = document.getElementById('cuota-selector-container');
       const datosExternoContainer = document.getElementById('datos-externo-container');
       const uploadFileContainer = document.getElementById('upload-file-container');
-      const cuotaSelector = document.getElementById('cuota-selector');
       const fileInputComprobante = document.getElementById('comprobante-manual-upload');
       const btnClearComprobante = document.getElementById('btn-clear-comprobante');
-
-      // Referencia al nuevo contenedor del checkbox
       const pagoFamiliarContainer = document.getElementById('pago-familiar-container');
 
       const tipoComprobanteSelect = document.getElementById('tipo-comprobante-select');
       if (tipoComprobanteSelect) {
         tipoComprobanteSelect.addEventListener('change', function() {
           const tipo = this.value;
-          
-          datosExternoContainer.style.display = (tipo) ? 'block' : 'none';
-          uploadFileContainer.style.display = (tipo) ? 'block' : 'none';
-          cuotaSelectorContainer.style.display = (tipo === 'mp_cuotas_group') ? 'block' : 'none';
+          datosExternoContainer.style.display = tipo ? 'block' : 'none';
+          uploadFileContainer.style.display = tipo ? 'block' : 'none';
+          cuotaSelectorContainer.style.display = tipo === 'mp_cuotas_group' ? 'block' : 'none';
 
-          // Lógica para mostrar/ocultar el checkbox de pago familiar
-          const esPagoTotal = (tipo === 'mp_total' || tipo === 'externo');
           if (pagoFamiliarContainer) {
-            if (tipo === 'mp_cuotas_group') {
-              pagoFamiliarContainer.style.display = 'none'; // Ocultar mientras se decide la sub-opción
-            } else {
-              pagoFamiliarContainer.style.display = esPagoTotal ? 'flex' : 'none';
-            }
+            const esPagoTotal = (tipo === 'mp_total' || tipo === 'externo');
+            const showFamiliarCheck = response.tieneHermanos && esPagoTotal;
+            pagoFamiliarContainer.style.display = showFamiliarCheck ? 'flex' : 'none';
           }
-
-          if (tipo !== 'mp_cuotas_group' && cuotaSelector) {
-            cuotaSelector.value = ''; 
-          }
-          if(fileInputComprobante) fileInputComprobante.value = '';
-          if(document.getElementById('comprobante-manual-name')) document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
-          if(btnClearComprobante) btnClearComprobante.style.display = 'none';
+          if (fileInputComprobante) fileInputComprobante.value = '';
+          if (document.getElementById('comprobante-manual-name')) document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
+          if (btnClearComprobante) btnClearComprobante.style.display = 'none';
         });
       }
-
-      // Añadir listener al sub-selector de cuotas
-      if (cuotaSelector) {
-        cuotaSelector.addEventListener('change', function() {
-          const subTipo = this.value;
-          const esPagoTotalCuotas = (subTipo === 'mp_cuota_total');
-          if (pagoFamiliarContainer) {
-            pagoFamiliarContainer.style.display = esPagoTotalCuotas ? 'flex' : 'none';
-          }
-        });
-      }
-      // --- (FIN MODIFICACIÓN) ---
 
       if (fileInputComprobante) {
         fileInputComprobante.addEventListener('change', function() {
@@ -424,117 +222,92 @@ function handleValidationSuccess(response) {
       if (btnSubmitComprobante) {
         btnSubmitComprobante.addEventListener('click', function() {
           const file = fileInputComprobante.files[0];
-          const tipoComprobanteSelect = document.getElementById('tipo-comprobante-select');
-          let tipoComprobante = tipoComprobanteSelect.value;
-          
-          const loaderComprobante = document.getElementById('loader-comprobante'); 
+          let tipoComprobante = document.getElementById('tipo-comprobante-select').value;
+          const loaderComprobante = document.getElementById('loader-comprobante');
           loaderComprobante.style.display = 'none';
-          loaderComprobante.innerHTML = `<div class="spinner"></div><p>Subiendo comprobante...</p>`; 
+          loaderComprobante.innerHTML = `<div class="spinner"></div><p>Subiendo comprobante...</p>`;
           
+          let cuotasSeleccionadas = [];
           if (tipoComprobante === 'mp_cuotas_group') {
-            const cuotaSelector = document.getElementById('cuota-selector');
-            if (!cuotaSelector.value) {
-              loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Por favor, seleccione la Cuota (b.1, b.2, b.3 o b.4) a la que corresponde el comprobante.</div>`;
+            document.querySelectorAll('.cuota-checkbox-item input:checked').forEach(chk => {
+              cuotasSeleccionadas.push(chk.value);
+            });
+            if (cuotasSeleccionadas.length === 0) {
+              loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0;">Por favor, seleccione al menos una cuota que corresponda al comprobante.</div>`;
               loaderComprobante.style.display = 'block';
               return;
             }
-            tipoComprobante = cuotaSelector.value;
-          }
-          
-          if (!tipoComprobante) {
-             loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Por favor, seleccione el tipo de comprobante.</div>`;
-             loaderComprobante.style.display = 'block';
-             return;
+          } else {
+             if (!tipoComprobante) {
+               loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0;">Por favor, seleccione el tipo de comprobante.</div>`;
+               loaderComprobante.style.display = 'block';
+               return;
+             }
+             cuotasSeleccionadas.push(tipoComprobante); // Para pagos totales, el array tiene un solo elemento
           }
 
-          let datosExtras = null;
           const nombrePagador = document.getElementById('externo-nombre-pagador').value;
           const dniPagadorInput = document.getElementById('externo-dni-pagador');
           const dniPagador = dniPagadorInput.value;
-
           if (!nombrePagador || !dniPagador) {
-            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Por favor, complete el Nombre/Apellido y DNI del Adulto Pagador.</div>`;
+            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0;">Por favor, complete el Nombre/Apellido y DNI del Adulto Pagador.</div>`;
             loaderComprobante.style.display = 'block';
             return;
           }
           if (!/^[0-9]{8}$/.test(dniPagador)) {
-            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Error: El DNI del Adulto Pagador debe tener exactamente 8 dígitos numéricos.</div>`;
+            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0;">Error: El DNI del Adulto Pagador debe tener 8 dígitos numéricos.</div>`;
             loaderComprobante.style.display = 'block';
             dniPagadorInput.focus();
             return;
           }
-          datosExtras = { nombrePagador: nombrePagador, dniPagador: dniPagador };
-
+          const datosExtras = { nombrePagador: nombrePagador, dniPagador: dniPagador };
           const dni = document.getElementById('dni-input').value;
-          
-          // --- (INICIO MODIFICACIÓN) ---
-          // Leer el valor de la casilla de verificación
           const esPagoFamiliar = document.getElementById('es-pago-familiar-check').checked;
-          // --- (FIN MODIFICACIÓN) ---
-
-          if (!file) { 
-            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Tenes que adjuntar un comprobante.</div>`;
+          if (!file) {
+            loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0;">Tenes que adjuntar un comprobante.</div>`;
             loaderComprobante.style.display = 'block';
-            return; 
+            return;
           }
 
           this.disabled = true;
           fileInputComprobante.disabled = true;
-          if(document.getElementById('btn-finalizar-upload')) document.getElementById('btn-finalizar-upload').disabled = true;
-
+          if (document.getElementById('btn-finalizar-upload')) document.getElementById('btn-finalizar-upload').disabled = true;
           loaderComprobante.style.display = 'block';
 
-          comprimirYLeerArchivo(file).then(fileData => { // Llama a la función que está en js2.html
+          comprimirYLeerArchivo(file).then(fileData => {
             google.script.run
-            .withSuccessHandler(handleComprobanteUploadSuccess)
-            .withFailureHandler(handleComprobanteUploadFailure)
-            // --- (INICIO MODIFICACIÓN) ---
-            // Enviar el nuevo valor booleano al servidor
-            .subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras, esPagoFamiliar);
-            // --- (FIN MODIFICACIÓN) ---
+              .withSuccessHandler(handleComprobanteUploadSuccess)
+              .withFailureHandler(handleComprobanteUploadFailure)
+              .subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras, esPagoFamiliar); // Se envía el array de cuotas
           }).catch(err => {
             handleComprobanteUploadFailure(err);
           });
         });
       }
-    } 
-    
+    }
+
     const btnFinalizar = document.getElementById('btn-finalizar-upload');
     if (btnFinalizar) {
-      btnFinalizar.addEventListener('click', function() {
-        window.top.location.href = APP_URL;
-      });
+      btnFinalizar.addEventListener('click', () => { window.top.location.href = APP_URL; });
     }
 
     document.getElementById('btn-mostrar-editar').addEventListener('click', mostrarFormEdicion);
     document.getElementById('btn-cancelar-edicion').addEventListener('click', ocultarFormEdicion);
-    document.getElementById('btn-edit-add-autorizado').addEventListener('click', () => addAutorizadoCamposEdicion()); // Llama a la función que está en js2.html
+    document.getElementById('btn-edit-add-autorizado').addEventListener('click', () => addAutorizadoCamposEdicion());
     document.getElementById('edit-aptitud-upload').addEventListener('change', manejarSubidaAptitudEdicion);
     document.getElementById('btn-guardar-cambios').addEventListener('click', submitDatosEditados);
-
-
-  } else { 
+  } else {
     statusDiv.innerHTML = `<div class="mensaje error"><strong>Aviso:</strong> ${response.message}</div>`;
   }
 }
 
-/**
- * Handler para fallo de PASO 1 (Validación)
- */
 function handleValidationFailure(error) {
   document.getElementById('btn-validar').disabled = false;
   document.getElementById('loader-validacion').style.display = 'none';
-  const statusDiv = document.getElementById('status-validacion');
-  statusDiv.innerHTML = `<div class="mensaje error"><strong>Error en el Servidor:</strong> ${error.message}</div>`;
+  document.getElementById('status-validacion').innerHTML = `<div class="mensaje error"><strong>Error en el Servidor:</strong> ${error.message}</div>`;
 }
 
-// =========================================================
-// --- FUNCIONES DE LÓGICA DE EDICIÓN Y SUBIDA ---
-// =========================================================
-
-/**
- * Puebla y muestra el formulario de edición de datos.
- */
+// ... (El resto de las funciones de js.html siguen aquí) ...
 function mostrarFormEdicion() {
   if (!datosEdicionGlobales) {
     alert('Error: No se cargaron los datos para editar.');
@@ -578,9 +351,6 @@ function mostrarFormEdicion() {
   document.getElementById('btn-mostrar-editar').style.display = 'none';
 }
 
-/**
- * Oculta el formulario de edición y resetea los campos.
- */
 function ocultarFormEdicion() {
   document.getElementById('editar-form-container').style.display = 'none';
   document.getElementById('btn-mostrar-editar').style.display = 'block';
@@ -589,9 +359,6 @@ function ocultarFormEdicion() {
   document.getElementById('edit-urlCertificadoAptitud').value = '';
 }
 
-/**
- * Maneja la subida del NUEVO certificado de aptitud en la sección de EDICIÓN.
- */
 function manejarSubidaAptitudEdicion() {
   const inputElement = document.getElementById('edit-aptitud-upload');
   const file = inputElement.files[0];
@@ -649,9 +416,6 @@ function manejarSubidaAptitudEdicion() {
   });
 }
 
-/**
- * Recolecta y envía los datos editados al servidor.
- */
 function submitDatosEditados() {
   const dni = document.getElementById('edit-dni').value;
   
@@ -734,9 +498,6 @@ function submitDatosEditados() {
     .actualizarDatosPersonales(dni, datosEditados);
 }
 
-/**
- * Sube el certificado de aptitud desde la pantalla de "Adeuda".
- */
 function submitAptitudManual() {
   const fileInput = document.getElementById('aptitud-manual-upload');
   const file = fileInput.files[0];
@@ -780,9 +541,6 @@ function submitAptitudManual() {
   });
 }
 
-/**
- * Handler para fallo en subida de comprobante.
- */
 function handleComprobanteUploadFailure(error) {
   document.getElementById('loader-comprobante').style.display = 'none';
   const statusDiv = document.getElementById('status-validacion');
@@ -797,9 +555,6 @@ function handleComprobanteUploadFailure(error) {
   if (btnFinalizar) btnFinalizar.disabled = false;
 }
 
-/**
- * Handler para éxito en subida de comprobante.
- */
 function handleComprobanteUploadSuccess(response) {
   document.getElementById('loader-comprobante').style.display = 'none';
   const statusDiv = document.getElementById('status-validacion');
@@ -811,16 +566,12 @@ function handleComprobanteUploadSuccess(response) {
   if (response.status === 'OK') {
     let finalMessage = response.message;
 
-    if (response.estadoPago && (response.estadoPago === 'Pagado' || response.estadoPago.includes('Pago total') || response.estadoPago.includes('Pago Total'))) {
-      
+    if (response.estadoPago && (response.estadoPago.includes('Pagado') || response.estadoPago.includes('Pago total') || response.estadoPago.includes('Pago Total'))) {
       finalMessage = response.message; 
-      
       if(document.getElementById('comprobante-manual-seccion')) {
           document.getElementById('comprobante-manual-seccion').style.display = 'none';
       }
-      // Modificamos el mensaje final para que siempre muestre el botón de finalizar
-      statusDiv.innerHTML = `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>`;
-
+      statusDiv.innerHTML = `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>` + statusDiv.innerHTML;
     } else {
       finalMessage += "<br>Puede subir otra cuota o finalizar.";
       statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>`);
@@ -830,7 +581,7 @@ function handleComprobanteUploadSuccess(response) {
       const datosExternoContainer = document.getElementById('datos-externo-container');
       const uploadFileContainer = document.getElementById('upload-file-container');
       const btnClearComprobante = document.getElementById('btn-clear-comprobante');
-      const pagoFamiliarContainer = document.getElementById('pago-familiar-container'); // (NUEVO)
+      const pagoFamiliarContainer = document.getElementById('pago-familiar-container');
 
       if(fileInputComprobante) fileInputComprobante.value = '';
       if(document.getElementById('comprobante-manual-name')) document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
@@ -838,10 +589,11 @@ function handleComprobanteUploadSuccess(response) {
       if (cuotaSelectorContainer) cuotaSelectorContainer.style.display = 'none';
       if (datosExternoContainer) datosExternoContainer.style.display = 'none';
       if (uploadFileContainer) uploadFileContainer.style.display = 'none';
-      if (pagoFamiliarContainer) pagoFamiliarContainer.style.display = 'none'; // (NUEVO)
+      if (pagoFamiliarContainer) pagoFamiliarContainer.style.display = 'none';
       if (btnClearComprobante) btnClearComprobante.style.display = 'none';
       if (document.getElementById('externo-nombre-pagador')) document.getElementById('externo-nombre-pagador').value = '';
       if (document.getElementById('externo-dni-pagador')) document.getElementById('externo-dni-pagador').value = '';
+      document.querySelectorAll('.cuota-checkbox-item input:checked').forEach(chk => chk.checked = false);
     }
     
     if(btnSubmitComprobante) btnSubmitComprobante.disabled = false;
@@ -849,7 +601,6 @@ function handleComprobanteUploadSuccess(response) {
     if(btnFinalizar) btnFinalizar.disabled = false;
     
     return; 
-
   } else {
     statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje error" style="margin-bottom:10px;">${response.message}</div>`);
     if(btnSubmitComprobante) btnSubmitComprobante.disabled = false;
@@ -858,13 +609,6 @@ function handleComprobanteUploadSuccess(response) {
   }
 }
 
-// =========================================================
-// --- LÓGICA DE INICIO Y ORQUESTACIÓN ---
-// =========================================================
-
-/**
- * Inicia el temporizador para mostrar el formulario.
- */
 function iniciarTemporizador(response) {
   document.getElementById('timer-seccion').style.display = 'block';
   document.getElementById('btn-validar').disabled = true;
@@ -881,9 +625,6 @@ function iniciarTemporizador(response) {
   }, 800);
 }
 
-/**
- * Muestra el formulario principal y lo puebla con datos.
- */
 function mostrarFormulario(response) {
   document.getElementById('validacion-seccion').style.display = 'none';
   document.getElementById('registro-seccion').style.display = 'block';
@@ -894,9 +635,6 @@ function mostrarFormulario(response) {
 
   if (response.datos) {
     document.getElementById('email').value = response.datos.email || '';
-  }
-
-  if (response.datos) {
     document.getElementById('nombre').value = response.datos.nombre || '';
     document.getElementById('apellido').value = response.datos.apellido || '';
     document.getElementById('fechaNacimiento').value = response.datos.fechaNacimiento || '';
@@ -930,11 +668,8 @@ function mostrarFormulario(response) {
         const autTrim = aut.trim();
         if (autTrim) {
           const match = autTrim.match(/(.*)\(DNI:\s?(\d+)\)/);
-          if (match) {
-            addAutorizadoCampos(match[1].trim(), match[2].trim()); // Llama a js2.html
-          } else {
-            addAutorizadoCampos(autTrim, ''); // Llama a js2.html
-          }
+          if (match) addAutorizadoCampos(match[1].trim(), match[2].trim());
+          else addAutorizadoCampos(autTrim, '');
         }
       });
     }
@@ -950,9 +685,8 @@ function mostrarFormulario(response) {
       opcionExtendida.disabled = true;
       opcionExtendida.textContent = "Jornada Extendida (SIN CUPO)";
     }
-    const msgCupo = document.getElementById('jornada-cupo-msg');
-    if (msgCupo) {
-      msgCupo.style.display = 'inline';
+    if (document.getElementById('jornada-cupo-msg')) {
+      document.getElementById('jornada-cupo-msg').style.display = 'inline';
     }
   }
 
@@ -963,44 +697,28 @@ function mostrarFormulario(response) {
   }
 
   if (esPreventa) {
-    const inputsParaBloquear = ['nombre', 'apellido', 'fechaNacimiento', 'email'];
-    inputsParaBloquear.forEach(id => {
+    ['nombre', 'apellido', 'fechaNacimiento', 'email'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         el.readOnly = true;
-        el.classList.add('campo-bloqueado');
-        el.classList.add('form-cache'); 
+        el.classList.add('campo-bloqueado', 'form-cache');
       }
     });
-
-    const jornadaSelect = document.getElementById('jornada');
-    if (jornadaSelect) {
-      jornadaSelect.classList.add('form-cache'); 
-    }
-
-    document.getElementById('dni').classList.add('campo-bloqueado');
-    document.getElementById('dni').classList.add('form-cache');
+    if (document.getElementById('jornada')) document.getElementById('jornada').classList.add('form-cache');
+    document.getElementById('dni').classList.add('campo-bloqueado', 'form-cache');
   }
 
-  if (document.querySelectorAll('.autorizado-nombre').length === 0) {
-    addAutorizadoCampos(); // Llama a js2.html
-  }
+  if (document.querySelectorAll('.autorizado-nombre').length === 0) addAutorizadoCampos();
 
-  guardarFormEnCache(); // Llama a js2.html
-  calcularYMostrarEdad(); // Llama a js2.html
-
-  toggleEspecifique('practicaDeporte', 'especifiqueDeporte'); // Llama a js2.html
-  toggleEspecifique('tieneEnfermedad', 'especifiqueEnfermedad'); // Llama a js2.html
-  toggleEspecifique('esAlergico', 'especifiqueAlergia'); // Llama a js2.html
-
-  toggleTransferenciaInfo(); // Llama a js2.html
-  toggleCuotasInfo(); // Llama a js2.html
+  guardarFormEnCache();
+  calcularYMostrarEdad();
+  toggleEspecifique('practicaDeporte', 'especifiqueDeporte');
+  toggleEspecifique('tieneEnfermedad', 'especifiqueEnfermedad');
+  toggleEspecifique('esAlergico', 'especifiqueAlergia');
+  toggleTransferenciaInfo();
+  toggleCuotasInfo();
 }
 
-
-/**
- * Maneja la subida de un archivo individual (Foto o Aptitud).
- */
 function manejarSubidaArchivo(inputElement, tipoArchivo, nombreLabelId, loaderId, urlHiddenId) {
   const file = inputElement.files[0];
   const nombreLabel = document.getElementById(nombreLabelId);
@@ -1028,7 +746,7 @@ function manejarSubidaArchivo(inputElement, tipoArchivo, nombreLabelId, loaderId
   document.getElementById('submit-button').disabled = true;
 
   loader.textContent = 'Preparando archivo (comprimiendo si es imagen)...';
-  comprimirYLeerArchivo(file).then(fileData => { // Llama a js2.html
+  comprimirYLeerArchivo(file).then(fileData => {
     loader.textContent = 'Subiendo archivo...';
     google.script.run
     .withSuccessHandler(function(response) {
