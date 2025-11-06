@@ -306,17 +306,20 @@ function registrarDatos(datos) {
 }
 
 // =========================================================
-// (Solo necesitas reemplazar esta función en tu Código.js)
+// --- (INICIO DE MODIFICACIÓN) ---
+// Función `subirComprobanteManual` y `uploadFileToDrive`
+// reemplazadas por completo.
 // =========================================================
 
 /**
-* (MODIFICADO - PETICIÓN 1)
-* - Cambia el estado de pago a "Pagado" para pagos totales.
-* - Actualiza el estado de cuotas individuales.
-* - Devuelve el estado de pago actualizado al cliente.
-* - ¡¡ACTUALIZADO CON TU NUEVO MENSAJE FINAL!!
+* (MODIFICADO)
+* - Acepta un nuevo argumento 'esPagoFamiliar' (booleano).
+* - Determina los NUEVOS ESTADOS DE PAGO ("Pago Total Familiar", "Pago total en cuotas").
+* - Construye el NUEVO NOMBRE DE ARCHIVO basado en las reglas.
+* - Llama a `uploadFileToDrive` con el nuevo nombre.
+* - Aplica el pago a toda la familia si `esPagoFamiliar` es true.
 */
-function subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras) {
+function subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras, esPagoFamiliar = false) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -324,17 +327,11 @@ function subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras) {
     if (!dniLimpio || !fileData || !tipoComprobante) {
       return { status: 'ERROR', message: 'Faltan datos (DNI, archivo o tipo de comprobante).' };
     }
-
     if (!datosExtras || !datosExtras.nombrePagador || !datosExtras.dniPagador) {
       return { status: 'ERROR', message: 'Faltan los datos del adulto pagador (Nombre o DNI).' };
     }
     if (!/^[0-9]{8}$/.test(datosExtras.dniPagador)) {
       return { status: 'ERROR', message: 'El DNI del pagador debe tener 8 dígitos.' };
-    }
-
-    const fileUrl = uploadFileToDrive(fileData.data, fileData.mimeType, fileData.fileName, dniLimpio, 'comprobante');
-    if (typeof fileUrl !== 'string' || !fileUrl.startsWith('http')) {
-      throw new Error("Error al subir el archivo a Drive: " + (fileUrl.message || 'Error desconocido'));
     }
 
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -346,86 +343,188 @@ function subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras) {
 
     if (celdaEncontrada) {
       const fila = celdaEncontrada.getRow();
+      const rangoFila = hoja.getRange(fila, 1, 1, hoja.getLastColumn()).getValues()[0];
+      
+      // --- 1. Obtener datos de la fila para el nombre del archivo ---
+      const dniHoja = rangoFila[COL_DNI_INSCRIPTO - 1];
+      const nombreHoja = rangoFila[COL_NOMBRE - 1];
+      const apellidoHoja = rangoFila[COL_APELLIDO - 1];
+      const metodoPagoHoja = rangoFila[COL_METODO_PAGO - 1] || 'Pago'; // Fallback por si está vacío
+      const cantidadCuotasRegistrada = parseInt(rangoFila[COL_CANTIDAD_CUOTAS - 1]) || 3;
+
+      let esPagoTotal = false;
+      let prefijoComprobante = "";
       let columnaDestinoArchivo;
-      let mensajeExito = "";
-      let estadoFinal = ""; // "Pagado" o "Cuotas (En revisión)"
-
-      // Guardar datos del pagador
-      hoja.getRange(fila, COL_PAGADOR_NOMBRE_MANUAL).setValue(datosExtras.nombrePagador); // AN (40)
-      hoja.getRange(fila, COL_PAGADOR_DNI_MANUAL).setValue(datosExtras.dniPagador); // AO (41)
-
-      // (NUEVO MENSAJE - PETICIÓN 1)
+      let nuevoEstadoPago = "";
       const mensajeFinalCompleto = `¡Inscripción completa!!!<br>Estimada familia, puede validar nuevamente con el dni y acceder a modificar datos de inscrpición en caso de que lo requiera.`;
 
-
+      // --- 2. Determinar tipo de pago, prefijo y columna de destino ---
       switch (tipoComprobante) {
-        case 'total_mp': // Mantenido por retrocompatibilidad
+        case 'total_mp': // Retrocompatibilidad
         case 'mp_total': // (a)
         case 'externo':  // (c)
-        case 'mp_cuota_total': // (b.4)
+          esPagoTotal = true;
           columnaDestinoArchivo = COL_COMPROBANTE_MANUAL_TOTAL_EXT; // AQ (43)
-          hoja.getRange(fila, columnaDestinoArchivo).setValue(fileUrl);
-          hoja.getRange(fila, COL_ESTADO_PAGO).setValue("Pagado");
-          // También marcar las 3 cuotas como pagadas (informativo)
-          hoja.getRange(fila, COL_CUOTA_1, 1, 3).setValues([["Pagada", "Pagada", "Pagada"]]);
-          
-          // (MODIFICADO - PETICIÓN 1)
-          mensajeExito = mensajeFinalCompleto;
-          estadoFinal = "Pagado";
+          prefijoComprobante = "Total";
           break;
-        
-        case 'cuota1_mp': // Mantenido por retrocompatibilidad
+        case 'mp_cuota_total': // (b.4)
+          esPagoTotal = true;
+          columnaDestinoArchivo = COL_COMPROBANTE_MANUAL_TOTAL_EXT; // AQ (43)
+          prefijoComprobante = "TotalCuotas";
+          break;
+        case 'cuota1_mp': // Retrocompatibilidad
         case 'mp_cuota_1': // (b.1)
           columnaDestinoArchivo = COL_COMPROBANTE_MANUAL_CUOTA1; // AR (44)
-          hoja.getRange(fila, columnaDestinoArchivo).setValue(fileUrl);
-          hoja.getRange(fila, COL_CUOTA_1).setValue("Pagada (En revisión)"); // AE (31)
-          mensajeExito = "Comprobante de Cuota 1 subido con éxito.";
+          prefijoComprobante = "Cuota1";
           break;
-        
-        case 'cuota2_mp': // Mantenido por retrocompatibilidad
+        case 'cuota2_mp': // Retrocompatibilidad
         case 'mp_cuota_2': // (b.2)
           columnaDestinoArchivo = COL_COMPROBANTE_MANUAL_CUOTA2; // AS (45)
-          hoja.getRange(fila, columnaDestinoArchivo).setValue(fileUrl);
-          hoja.getRange(fila, COL_CUOTA_2).setValue("Pagada (En revisión)"); // AF (32)
-          mensajeExito = "Comprobante de Cuota 2 subido con éxito.";
+          prefijoComprobante = "Cuota2";
           break;
-        
-        case 'cuota3_mp': // Mantenido por retrocompatibilidad
+        case 'cuota3_mp': // Retrocompatibilidad
         case 'mp_cuota_3': // (b.3)
           columnaDestinoArchivo = COL_COMPROBANTE_MANUAL_CUOTA3; // AT (46)
-          hoja.getRange(fila, columnaDestinoArchivo).setValue(fileUrl);
-          hoja.getRange(fila, COL_CUOTA_3).setValue("Pagada (En revisión)"); // AG (33)
-          mensajeExito = "Comprobante de Cuota 3 subido con éxito.";
+          prefijoComprobante = "Cuota3";
           break;
-        
         default:
           throw new Error(`Tipo de comprobante no reconocido: ${tipoComprobante}`);
       }
 
-      // Si no fue un pago total, revisamos el estado de las cuotas
-      if (estadoFinal !== "Pagado") {
-        // Leemos los valores actualizados de las cuotas
-        const [c1, c2, c3] = hoja.getRange(fila, COL_CUOTA_1, 1, 3).getValues()[0];
-        const pagadas = [c1, c2, c3].filter(c => String(c).startsWith("Pagada")).length;
-        const cantidadCuotasRegistrada = parseInt(hoja.getRange(fila, COL_CANTIDAD_CUOTAS).getValue()) || 3; // Asumir 3 si no está
+      // --- 3. Determinar el NUEVO ESTADO DE PAGO ---
+      if (esPagoTotal) {
+        if (esPagoFamiliar) {
+          if (metodoPagoHoja === 'Pago en Cuotas') {
+            nuevoEstadoPago = "Pago total en cuotas";
+          } else {
+            nuevoEstadoPago = "Pago Total Familiar"; // Regla 1
+          }
+        } else { // Pago total individual
+          if (metodoPagoHoja === 'Pago en Cuotas') {
+            nuevoEstadoPago = "Pago total en cuotas"; // Regla 2 (cuotas)
+          } else {
+            nuevoEstadoPago = "Pagado"; // Regla 2 (transfer/efectivo)
+          }
+        }
+      } else {
+        // Es un pago de cuota individual (1, 2 o 3)
+        // Revisamos si esta cuota completa el total
+        const [c1, c2, c3] = [rangoFila[COL_CUOTA_1 - 1], rangoFila[COL_CUOTA_2 - 1], rangoFila[COL_CUOTA_3 - 1]];
+        let pagadas = [c1, c2, c3].filter(c => String(c).startsWith("Pagada")).length;
+        
+        // Contamos la que se está subiendo ahora
+        if (tipoComprobante === 'mp_cuota_1' && !String(c1).startsWith("Pagada")) pagadas++;
+        if (tipoComprobante === 'mp_cuota_2' && !String(c2).startsWith("Pagada")) pagadas++;
+        if (tipoComprobante === 'mp_cuota_3' && !String(c3).startsWith("Pagada")) pagadas++;
 
         if (pagadas >= cantidadCuotasRegistrada) {
-          hoja.getRange(fila, COL_ESTADO_PAGO).setValue("Pagado");
-          // (MODIFICADO - PETICIÓN 1)
-          let cuotaNum = tipoComprobante.slice(-1); // Extrae el '1', '2' o '3'
-          mensajeExito = `¡Felicidades! Se registró la Cuota ${cuotaNum}. Ha completado las ${cantidadCuotasRegistrada} cuotas.<br>${mensajeFinalCompleto}`;
-          estadoFinal = "Pagado";
+          nuevoEstadoPago = "Pago total en cuotas"; // Regla 2 (cuotas)
         } else {
-          const pendientes = cantidadCuotasRegistrada - pagadas;
-          hoja.getRange(fila, COL_ESTADO_PAGO).setValue("Cuotas (En revisión)");
-          mensajeExito = `Se registró el pago de la cuota. Le quedan ${pendientes} cuota${pendientes > 1 ? 's' : ''} pendiente${pendientes > 1 ? 's' : ''}.`;
-          estadoFinal = "Cuotas (En revisión)";
+          nuevoEstadoPago = "Cuotas (En revisión)"; // Estado intermedio
         }
       }
 
-      Logger.log(`Comprobante manual [${tipoComprobante}] subido para DNI ${dniLimpio} en fila ${fila}. Estado final: ${estadoFinal}`);
-      // Devolvemos el estado final al cliente
-      return { status: 'OK', message: mensajeExito, estadoPago: estadoFinal };
+      // --- 4. Construir el Nombre del Archivo ---
+      let baseNombreArchivo = "";
+      const metodoPagoSimple = metodoPagoHoja.replace(/[\s()]/g, ''); // "Pago en Cuotas" -> "PagoenCuotas"
+      const estadoPagoSimple = nuevoEstadoPago.replace(/[\s()]/g, ''); // "Cuotas (En revisión)" -> "CuotasEnrevisión"
+      
+      // Regla Familiar (todos los tipos): "dni_apellido_Metodo_Estado"
+      if (esPagoFamiliar) {
+        baseNombreArchivo = `${dniHoja}_${apellidoHoja}_${metodoPagoSimple}_${estadoPagoSimple}`;
+      } else {
+      // Regla Individual (todos los tipos): "dni_apellido_nombre_Metodo_Estado"
+        baseNombreArchivo = `${dniHoja}_${apellidoHoja}_${nombreHoja}_${metodoPagoSimple}_${estadoPagoSimple}`;
+      }
+
+      // Añadir prefijo de cuota (si no es un total de Transferencia/Efectivo)
+      if (prefijoComprobante === "Cuota1" || prefijoComprobante === "Cuota2" || prefijoComprobante === "Cuota3" || prefijoComprobante === "TotalCuotas") {
+         baseNombreArchivo = `${prefijoComprobante}_${baseNombreArchivo}`;
+      }
+      
+      // Limpiar y añadir extensión
+      const nombreArchivoLimpio = baseNombreArchivo.replace(/[^\w.-]/g, '_');
+      const extension = (fileData.fileName.includes('.')) ? fileData.fileName.split('.').pop() : 'jpg'; // Asumir jpg si no hay extensión
+      const nuevoNombreArchivo = `${nombreArchivoLimpio}.${extension}`;
+
+      Logger.log(`Nuevo nombre de archivo: ${nuevoNombreArchivo}`);
+
+      // --- 5. Subir el Archivo ---
+      const fileUrl = uploadFileToDrive(fileData.data, fileData.mimeType, nuevoNombreArchivo, dniLimpio, 'comprobante');
+      if (typeof fileUrl !== 'string' || !fileUrl.startsWith('http')) {
+        throw new Error("Error al subir el archivo a Drive: " + (fileUrl.message || 'Error desconocido'));
+      }
+
+      // --- 6. Aplicar Cambios a la Hoja ---
+      const nombrePagador = datosExtras.nombrePagador;
+      const dniPagador = datosExtras.dniPagador;
+      let mensajeExito = "";
+      
+      // Lógica de Aplicación (Familiar vs Individual)
+      if (esPagoFamiliar && esPagoTotal) {
+        const idFamiliar = rangoFila[COL_VINCULO_PRINCIPAL - 1]; // AV (48)
+        
+        if (!idFamiliar) {
+           Logger.log(`Pago Familiar marcado, pero no se encontró ID Familiar en fila ${fila}. Aplicando pago solo al DNI ${dniLimpio}.`);
+           // Aplicar solo al individuo
+           hoja.getRange(fila, COL_PAGADOR_NOMBRE_MANUAL).setValue(nombrePagador);
+           hoja.getRange(fila, COL_PAGADOR_DNI_MANUAL).setValue(dniPagador);
+           hoja.getRange(fila, columnaDestinoArchivo).setValue(fileUrl);
+           hoja.getRange(fila, COL_ESTADO_PAGO).setValue(nuevoEstadoPago);
+           hoja.getRange(fila, COL_CUOTA_1, 1, 3).setValues([["Pagada", "Pagada", "Pagada"]]);
+           
+        } else {
+          // Aplicar a toda la familia
+          const rangoVinculos = hoja.getRange(2, COL_VINCULO_PRINCIPAL, hoja.getLastRow() - 1, 1);
+          const todasLasFilas = rangoVinculos.createTextFinder(idFamiliar).matchEntireCell(true).findAll();
+          let nombresActualizados = [];
+
+          todasLasFilas.forEach(celda => {
+            const filaHermano = celda.getRow();
+            hoja.getRange(filaHermano, COL_PAGADOR_NOMBRE_MANUAL).setValue(nombrePagador);
+            hoja.getRange(filaHermano, COL_PAGADOR_DNI_MANUAL).setValue(dniPagador);
+            hoja.getRange(filaHermano, columnaDestinoArchivo).setValue(fileUrl);
+            hoja.getRange(filaHermano, COL_ESTADO_PAGO).setValue(nuevoEstadoPago);
+            hoja.getRange(filaHermano, COL_CUOTA_1, 1, 3).setValues([["Pagada", "Pagada", "Pagada"]]);
+            
+            const nombre = hoja.getRange(filaHermano, COL_NOMBRE).getValue();
+            nombresActualizados.push(nombre);
+          });
+          Logger.log(`Pago Familiar aplicado a ${todasLasFilas.length} miembros: ${nombresActualizados.join(', ')}`);
+          mensajeExito = `¡Pago Familiar Total registrado con éxito para ${nombresActualizados.length} inscriptos!<br>${mensajeFinalCompleto}`;
+        }
+      
+      } else {
+        // Aplicación Individual (como antes)
+        hoja.getRange(fila, COL_PAGADOR_NOMBRE_MANUAL).setValue(nombrePagador);
+        hoja.getRange(fila, COL_PAGADOR_DNI_MANUAL).setValue(dniPagador);
+        hoja.getRange(fila, columnaDestinoArchivo).setValue(fileUrl);
+        hoja.getRange(fila, COL_ESTADO_PAGO).setValue(nuevoEstadoPago);
+
+        // Actualizar cuotas individuales si es pago de cuota
+        if (tipoComprobante === 'mp_cuota_1') hoja.getRange(fila, COL_CUOTA_1).setValue("Pagada (En revisión)");
+        if (tipoComprobante === 'mp_cuota_2') hoja.getRange(fila, COL_CUOTA_2).setValue("Pagada (En revisión)");
+        if (tipoComprobante === 'mp_cuota_3') hoja.getRange(fila, COL_CUOTA_3).setValue("Pagada (En revisión)");
+
+        // Si este pago completó el total, marcar todas como pagadas
+        if (nuevoEstadoPago === "Pago total en cuotas" || nuevoEstadoPago === "Pagado") {
+            hoja.getRange(fila, COL_CUOTA_1, 1, 3).setValues([["Pagada", "Pagada", "Pagada"]]);
+        }
+      }
+
+      // --- 7. Formular Mensaje de Éxito ---
+      if (!mensajeExito) { // Si el mensaje no se seteó en el bloque familiar
+         if (nuevoEstadoPago === "Pago total en cuotas" || nuevoEstadoPago === "Pagado" || nuevoEstadoPago === "Pago Total Familiar") {
+            mensajeExito = mensajeFinalCompleto;
+         } else {
+            // Quedó en "Cuotas (En revisión)"
+            const pendientes = cantidadCuotasRegistrada - [hoja.getRange(fila, COL_CUOTA_1, 1, 3).getValues()[0]].filter(c => String(c).startsWith("Pagada")).length;
+            mensajeExito = `Se registró el pago de la cuota. Le quedan ${pendientes} cuota${pendientes > 1 ? 's' : ''} pendiente${pendientes > 1 ? 's' : ''}.`;
+         }
+      }
+
+      Logger.log(`Comprobante [${tipoComprobante}] subido para DNI ${dniLimpio}. Estado final: ${nuevoEstadoPago}. ¿Pago Familiar?: ${esPagoFamiliar}`);
+      return { status: 'OK', message: mensajeExito, estadoPago: nuevoEstadoPago };
 
     } else {
       Logger.log(`No se encontró DNI ${dniLimpio} para subir comprobante manual.`);
@@ -433,12 +532,61 @@ function subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras) {
     }
 
   } catch (e) {
-    Logger.log("Error en subirComprobanteManual: " + e.toString());
+    Logger.log("Error en subirComprobanteManual: " + e.toString() + " Stack: " + e.stack);
     return { status: 'ERROR', message: 'Error en el servidor: ' + e.message };
   } finally {
     lock.releaseLock();
   }
 }
+
+
+/**
+ * (MODIFICADO)
+ * Sube un archivo a Drive con un nombre de archivo específico.
+ * El 'filename' original del usuario ya no se usa, se usa 'newFilename'.
+ */
+function uploadFileToDrive(data, mimeType, newFilename, dni, tipoArchivo) {
+  try {
+    if (!dni) return { status: 'ERROR', message: 'No se recibió DNI.' };
+    let parentFolderId;
+    switch (tipoArchivo) {
+      case 'foto': parentFolderId = FOLDER_ID_FOTOS; break;
+      case 'ficha': parentFolderId = FOLDER_ID_FICHAS; break;
+      case 'comprobante': parentFolderId = FOLDER_ID_COMPROBANTES; break;
+      default: return { status: 'ERROR', message: 'Tipo de archivo no reconocido.' };
+    }
+    if (!parentFolderId || parentFolderId.includes('AQUI_VA_EL_ID')) {
+      return { status: 'ERROR', message: 'IDs de carpetas no configurados.' };
+    }
+
+    const parentFolder = DriveApp.getFolderById(parentFolderId);
+    let subFolder;
+    const folders = parentFolder.getFoldersByName(dni);
+    subFolder = folders.hasNext() ? folders.next() : parentFolder.createFolder(dni);
+
+    const decodedData = Utilities.base64Decode(data.split(',')[1]);
+    // --- (MODIFICACIÓN) ---
+    // Se usa 'newFilename' en lugar del 'filename' original del archivo.
+    const blob = Utilities.newBlob(decodedData, mimeType, newFilename); 
+    // --- (FIN MODIFICACIÓN) ---
+    
+    const file = subFolder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return file.getUrl();
+
+  } catch (e) {
+    Logger.log('Error en uploadFileToDrive: ' + e.toString());
+    return { status: 'ERROR', message: 'Error al subir archivo: ' + e.message };
+  }
+}
+
+// =========================================================
+// --- (FIN DE MODIFICACIÓN) ---
+// El resto de las funciones (actualizarDatosPersonales,
+// aplicarColorGrupo, limpiarDNI, etc.) permanecen igual.
+// =========================================================
+
+
 /**
  * (NUEVA FUNCIÓN)
  * Permite a un usuario ya registrado editar campos específicos.
@@ -520,36 +668,6 @@ function aplicarColorGrupo(hoja, fila, textoGrupo, hojaConfig) {
   }
 }
 
-function uploadFileToDrive(data, mimeType, filename, dni, tipoArchivo) {
-  try {
-    if (!dni) return { status: 'ERROR', message: 'No se recibió DNI.' };
-    let parentFolderId;
-    switch (tipoArchivo) {
-      case 'foto': parentFolderId = FOLDER_ID_FOTOS; break;
-      case 'ficha': parentFolderId = FOLDER_ID_FICHAS; break;
-      case 'comprobante': parentFolderId = FOLDER_ID_COMPROBANTES; break;
-      default: return { status: 'ERROR', message: 'Tipo de archivo no reconocido.' };
-    }
-    if (!parentFolderId || parentFolderId.includes('AQUI_VA_EL_ID')) {
-      return { status: 'ERROR', message: 'IDs de carpetas no configurados.' };
-    }
-
-    const parentFolder = DriveApp.getFolderById(parentFolderId);
-    let subFolder;
-    const folders = parentFolder.getFoldersByName(dni);
-    subFolder = folders.hasNext() ? folders.next() : parentFolder.createFolder(dni);
-
-    const decodedData = Utilities.base64Decode(data.split(',')[1]);
-    const blob = Utilities.newBlob(decodedData, mimeType, filename);
-    const file = subFolder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    return file.getUrl();
-
-  } catch (e) {
-    Logger.log('Error en uploadFileToDrive: ' + e.toString());
-    return { status: 'ERROR', message: 'Error al subir archivo: ' + e.message };
-  }
-}
 
 function limpiarDNI(dni) {
   if (!dni) return '';
@@ -903,8 +1021,8 @@ function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio,
   const c_c3 = rangoFila[COL_COMPROBANTE_MANUAL_CUOTA3 - 1];      // AT
   const tieneComprobantes = c_total || c_c1 || c_c2 || c_c3;
 
-  // Si el estado es "En revisión" o "Pagado", PERO el usuario borró todos los comprobantes...
-  if (!tieneComprobantes && (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pagado'))) {
+  // Si el estado es "En revisión" o "Pagado" (o los nuevos), PERO el usuario borró todos los comprobantes...
+  if (!tieneComprobantes && (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Total'))) {
     Logger.log(`Corrección de estado para DNI ${dniLimpio}: El estado era '${estadoPagoActual}' pero no hay comprobantes. Reseteando a 'Pendiente'.`);
     
     // Resetear el estado al original "Pendiente"
@@ -930,10 +1048,13 @@ function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio,
 
 
   // Ahora, el resto de la función usa 'estadoPagoActual' (que está corregido)
-  if (String(estadoPagoActual).includes('Pagado')) {
+  // --- (MODIFICACIÓN) ---
+  // Se incluyen los nuevos estados de pago en la lógica de "pagado"
+  if (String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Pago Total') || String(estadoPagoActual).includes('Pago total')) {
+  // --- (FIN MODIFICACIÓN) ---
     return {
       status: 'REGISTRO_ENCONTRADO',
-      message:  `✅ El DNI  ${dniLimpio} (${nombreRegistrado}) ya se encuentra REGISTRADO y la inscripción está PAGADA.`,
+      message:  `✅ El DNI  ${dniLimpio} (${nombreRegistrado}) ya se encuentra REGISTRADO y la inscripción está PAGADA (${estadoPagoActual}).`, // (Mensaje actualizado)
       adeudaAptitud: adeudaAptitud,
       cantidadCuotas: cantidadCuotasRegistrada,
       metodoPago: metodoPago,
@@ -978,6 +1099,8 @@ function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio,
         }
       }
        if (proximaCuotaPendiente == null && cantidadCuotasRegistrada > 0) {
+          // Esto es un fallback si las cuotas están pagadas pero el estado principal no se actualizó
+          hojaRegistro.getRange(filaRegistro, COL_ESTADO_PAGO).setValue("Pago total en cuotas");
           return {
             status: 'REGISTRO_ENCONTRADO',
             message:  `✅ El DNI  ${dniLimpio} (${nombreRegistrado}) ya completó todas las cuotas.`,
@@ -1013,8 +1136,15 @@ function subirAptitudManual(dni, fileData) {
     if (!dniLimpio || !fileData) {
       return { status: 'ERROR', message: 'Faltan datos (DNI o archivo).' };
     }
+    
+    // --- (INICIO MODIFICACIÓN NOMBRE DE ARCHIVO) ---
+    // Para la aptitud, usamos un nombre simple
+    const extension = (fileData.fileName.includes('.')) ? fileData.fileName.split('.').pop() : 'pdf';
+    const nuevoNombreAptitud = `AptitudFisica_${dniLimpio}.${extension}`;
+    
+    const fileUrl = uploadFileToDrive(fileData.data, fileData.mimeType, nuevoNombreAptitud, dniLimpio, 'ficha');
+    // --- (FIN MODIFICACIÓN) ---
 
-    const fileUrl = uploadFileToDrive(fileData.data, fileData.mimeType, fileData.fileName, dniLimpio, 'ficha');
     if (typeof fileUrl !== 'string' || !fileUrl.startsWith('http')) {
       throw new Error("Error al subir el archivo a Drive.");
     }
@@ -1055,16 +1185,24 @@ function subirArchivoIndividual(fileData, dni, tipoArchivo) {
     if (!fileData || !dni || !tipoArchivo) {
       return { status: 'ERROR', message: 'Faltan datos para la subida (DNI, archivo o tipo).' };
     }
-
     const dniLimpio = limpiarDNI(dni);
 
+    // --- (INICIO MODIFICACIÓN NOMBRE DE ARCHIVO) ---
+    // Para fotos, usamos un nombre simple
+    let nuevoNombre = fileData.fileName;
+    if (tipoArchivo === 'foto') {
+      const extension = (fileData.fileName.includes('.')) ? fileData.fileName.split('.').pop() : 'jpg';
+      nuevoNombre = `FotoCarnet_${dniLimpio}.${extension}`;
+    }
+    
     const fileUrl = uploadFileToDrive(
       fileData.data,
       fileData.mimeType,
-      fileData.fileName,
+      nuevoNombre, // Usamos el nombre nuevo
       dniLimpio,
       tipoArchivo
     );
+    // --- (FIN MODIFICACIÓN) ---
 
     if (typeof fileUrl === 'object' && fileUrl.status === 'ERROR') {
       return fileUrl;

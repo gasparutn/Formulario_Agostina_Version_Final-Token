@@ -223,6 +223,8 @@ function handleValidationSuccess(response) {
       </div>`;
     }
     
+    // --- (INICIO MODIFICACIÓN) ---
+    // Este bloque ahora contiene el HTML de la casilla de verificación familiar
     if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA')) {
       html += `
       <div id="comprobante-manual-seccion" style="margin-top: 15px; border: 1px solid var(--color-principal); padding: 15px; border-radius: 5px;">
@@ -260,6 +262,11 @@ function handleValidationSuccess(response) {
       <input type="text" id="externo-nombre-pagador" placeholder="Nombre Apellido (Quien paga)">
       <label for="externo-dni-pagador">DNI (del Adulto Pagador):</label>
       <input type="tel" id="externo-dni-pagador" placeholder="DNI (Quien paga)" pattern="[0-9]{8}" inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos.">
+      
+      <div id="pago-familiar-container" style="display: none;"> <input type="checkbox" id="es-pago-familiar-check">
+        <label for="es-pago-familiar-check">¿Este pago total cubre a toda la familia (hermanos/as)?</label>
+      </div>
+
       </div>
 
       <div id="upload-file-container">
@@ -280,6 +287,7 @@ function handleValidationSuccess(response) {
       </div>
       `;
     } else {
+    // --- (FIN MODIFICACIÓN) ---
       if (response.adeudaAptitud !== true) {
         html += `<button type="button" id="btn-finalizar-upload" class="btn-final-volver">Volver al Inicio</button>`;
       }
@@ -343,6 +351,8 @@ function handleValidationSuccess(response) {
       document.getElementById('btn-submit-aptitud-manual').addEventListener('click', submitAptitudManual);
     }
 
+    // --- (INICIO MODIFICACIÓN) ---
+    // Este bloque ahora contiene los listeners para la casilla de pago familiar
     if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA')) { 
       const cuotaSelectorContainer = document.getElementById('cuota-selector-container');
       const datosExternoContainer = document.getElementById('datos-externo-container');
@@ -350,6 +360,9 @@ function handleValidationSuccess(response) {
       const cuotaSelector = document.getElementById('cuota-selector');
       const fileInputComprobante = document.getElementById('comprobante-manual-upload');
       const btnClearComprobante = document.getElementById('btn-clear-comprobante');
+
+      // Referencia al nuevo contenedor del checkbox
+      const pagoFamiliarContainer = document.getElementById('pago-familiar-container');
 
       const tipoComprobanteSelect = document.getElementById('tipo-comprobante-select');
       if (tipoComprobanteSelect) {
@@ -360,6 +373,16 @@ function handleValidationSuccess(response) {
           uploadFileContainer.style.display = (tipo) ? 'block' : 'none';
           cuotaSelectorContainer.style.display = (tipo === 'mp_cuotas_group') ? 'block' : 'none';
 
+          // Lógica para mostrar/ocultar el checkbox de pago familiar
+          const esPagoTotal = (tipo === 'mp_total' || tipo === 'externo');
+          if (pagoFamiliarContainer) {
+            if (tipo === 'mp_cuotas_group') {
+              pagoFamiliarContainer.style.display = 'none'; // Ocultar mientras se decide la sub-opción
+            } else {
+              pagoFamiliarContainer.style.display = esPagoTotal ? 'flex' : 'none';
+            }
+          }
+
           if (tipo !== 'mp_cuotas_group' && cuotaSelector) {
             cuotaSelector.value = ''; 
           }
@@ -368,6 +391,18 @@ function handleValidationSuccess(response) {
           if(btnClearComprobante) btnClearComprobante.style.display = 'none';
         });
       }
+
+      // Añadir listener al sub-selector de cuotas
+      if (cuotaSelector) {
+        cuotaSelector.addEventListener('change', function() {
+          const subTipo = this.value;
+          const esPagoTotalCuotas = (subTipo === 'mp_cuota_total');
+          if (pagoFamiliarContainer) {
+            pagoFamiliarContainer.style.display = esPagoTotalCuotas ? 'flex' : 'none';
+          }
+        });
+      }
+      // --- (FIN MODIFICACIÓN) ---
 
       if (fileInputComprobante) {
         fileInputComprobante.addEventListener('change', function() {
@@ -432,6 +467,11 @@ function handleValidationSuccess(response) {
 
           const dni = document.getElementById('dni-input').value;
           
+          // --- (INICIO MODIFICACIÓN) ---
+          // Leer el valor de la casilla de verificación
+          const esPagoFamiliar = document.getElementById('es-pago-familiar-check').checked;
+          // --- (FIN MODIFICACIÓN) ---
+
           if (!file) { 
             loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0; background-color: #f8d7da; color: #721c24;">Tenes que adjuntar un comprobante.</div>`;
             loaderComprobante.style.display = 'block';
@@ -448,7 +488,10 @@ function handleValidationSuccess(response) {
             google.script.run
             .withSuccessHandler(handleComprobanteUploadSuccess)
             .withFailureHandler(handleComprobanteUploadFailure)
-            .subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras);
+            // --- (INICIO MODIFICACIÓN) ---
+            // Enviar el nuevo valor booleano al servidor
+            .subirComprobanteManual(dni, fileData, tipoComprobante, datosExtras, esPagoFamiliar);
+            // --- (FIN MODIFICACIÓN) ---
           }).catch(err => {
             handleComprobanteUploadFailure(err);
           });
@@ -504,7 +547,7 @@ function mostrarFormEdicion() {
   document.getElementById('edit-dniResponsable1').value = datosEdicionGlobales.dniResponsable1 || '';
   document.getElementById('edit-telResp1').value = datosEdicionGlobales.telResponsable1 || '';
   document.getElementById('edit-adultoResponsable2').value = datosEdicionGlobales.adultoResponsable2 || '';
-  document.getElementById('edit-telResp2').value = datosEdicionGlobales.telResponsable2 || '';
+  document.getElementById('edit-telResp2').value = datosEdicionGlobales.telResp2 || '';
   
   document.getElementById('edit-aptitud-upload').value = '';
   document.getElementById('edit-aptitud-name').textContent = 'Ningún archivo seleccionado';
@@ -768,13 +811,14 @@ function handleComprobanteUploadSuccess(response) {
   if (response.status === 'OK') {
     let finalMessage = response.message;
 
-    if (response.estadoPago && (response.estadoPago === 'Pagado' || response.estadoPago.includes('Pagado'))) {
+    if (response.estadoPago && (response.estadoPago === 'Pagado' || response.estadoPago.includes('Pago total') || response.estadoPago.includes('Pago Total'))) {
       
       finalMessage = response.message; 
       
       if(document.getElementById('comprobante-manual-seccion')) {
           document.getElementById('comprobante-manual-seccion').style.display = 'none';
       }
+      // Modificamos el mensaje final para que siempre muestre el botón de finalizar
       statusDiv.innerHTML = `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>`;
 
     } else {
@@ -786,6 +830,7 @@ function handleComprobanteUploadSuccess(response) {
       const datosExternoContainer = document.getElementById('datos-externo-container');
       const uploadFileContainer = document.getElementById('upload-file-container');
       const btnClearComprobante = document.getElementById('btn-clear-comprobante');
+      const pagoFamiliarContainer = document.getElementById('pago-familiar-container'); // (NUEVO)
 
       if(fileInputComprobante) fileInputComprobante.value = '';
       if(document.getElementById('comprobante-manual-name')) document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
@@ -793,6 +838,7 @@ function handleComprobanteUploadSuccess(response) {
       if (cuotaSelectorContainer) cuotaSelectorContainer.style.display = 'none';
       if (datosExternoContainer) datosExternoContainer.style.display = 'none';
       if (uploadFileContainer) uploadFileContainer.style.display = 'none';
+      if (pagoFamiliarContainer) pagoFamiliarContainer.style.display = 'none'; // (NUEVO)
       if (btnClearComprobante) btnClearComprobante.style.display = 'none';
       if (document.getElementById('externo-nombre-pagador')) document.getElementById('externo-nombre-pagador').value = '';
       if (document.getElementById('externo-dni-pagador')) document.getElementById('externo-dni-pagador').value = '';
