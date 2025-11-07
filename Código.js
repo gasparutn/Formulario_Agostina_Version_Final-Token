@@ -108,10 +108,6 @@ function registrarDatos(datos) {
     const filaInsertada = hojaRegistro.getLastRow();
 
     aplicarColorGrupo(hojaRegistro, filaInsertada, textoGrupo, hojaConfig);
-    // --- (MODIFICACIÓN) ---
-    // La siguiente línea ha sido eliminada para que ya no se genere el checkbox en la columna AU.
-    // hojaRegistro.getRange(filaInsertada, COL_ENVIAR_EMAIL_MANUAL).setDataValidation(rule);
-    // --- (FIN MODIFICACIÓN) ---
     hojaRegistro.getRange(filaInsertada, COL_VINCULO_PRINCIPAL).setNumberFormat("0");
 
     let hermanosConEstado = [];
@@ -173,10 +169,10 @@ function registrarDatos(datos) {
 /**
 * (MODIFICADO)
 * - Acepta un array `cuotasSeleccionadas`.
-* - Determina los NUEVOS ESTADOS DE PAGO ("Pago Total Familiar", "Pago total en cuotas").
+* - Determina los NUEVOS ESTADOS DE PAGO ("Pago Total Familiar", "Pago total en cuotas", "Pago Cuota 1 y 2").
 * - Construye el NUEVO NOMBRE DE ARCHIVO basado en las reglas.
-* - Llama a `uploadFileToDrive` con el nuevo nombre.
-* - Aplica el pago a toda la familia si `esPagoFamiliar` es true.
+* - Escribe el comprobante en las columnas de cuotas correctas (AR, AS, AT).
+* - Aplica el pago a toda la familia si `esPagoFamiliar` es true (¡incluyendo cuotas parciales!).
 */
 function subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras, esPagoFamiliar = false) {
   const lock = LockService.getScriptLock();
@@ -202,112 +198,189 @@ function subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras,
 
     if (celdaEncontrada) {
       const fila = celdaEncontrada.getRow();
-      const rangoFila = hoja.getRange(fila, 1, 1, hoja.getLastColumn()).getValues()[0];
+      let rangoFila = hoja.getRange(fila, 1, 1, hoja.getLastColumn()).getValues()[0];
       
+      // --- 1. Obtener datos de la fila para el nombre del archivo ---
       const dniHoja = rangoFila[COL_DNI_INSCRIPTO - 1];
       const nombreHoja = rangoFila[COL_NOMBRE - 1];
       const apellidoHoja = rangoFila[COL_APELLIDO - 1];
-      const metodoPagoHoja = rangoFila[COL_METODO_PAGO - 1] || 'Pago';
+      const metodoPagoHoja = rangoFila[COL_METODO_PAGO - 1] || 'Pago'; // Fallback por si está vacío
       const cantidadCuotasRegistrada = parseInt(rangoFila[COL_CANTIDAD_CUOTAS - 1]) || 3;
       
       const tipoComprobantePrincipal = cuotasSeleccionadas[0]; // Usamos el primero para la lógica principal
-      let esPagoTotal = ['mp_total', 'externo'].includes(tipoComprobantePrincipal);
+      let esPagoTotalCompleto = ['mp_total', 'externo'].includes(tipoComprobantePrincipal);
       let nuevoEstadoPago = "";
+      const mensajeFinalCompleto = `¡Inscripción completa!!!<br>Estimada familia, puede validar nuevamente con el dni y acceder a modificar datos de inscrpición en caso de que lo requiera.`;
+
+      // --- 2. Determinar si es un pago total de cuotas ---
+      const cuotasPagadasAhora = new Set(cuotasSeleccionadas);
+      let cuotasPagadasNombres = []; // Para el estado de pago, ej ["Cuota 1", "Cuota 2"]
+      let pagadasCount = 0;
       
-      // Determinar si es un pago total de cuotas
-      if (!esPagoTotal && metodoPagoHoja === 'Pago en Cuotas') {
-        const cuotasPagadasAhora = new Set(cuotasSeleccionadas);
+      if (metodoPagoHoja === 'Pago en Cuotas') {
         const [c1, c2, c3] = [rangoFila[COL_CUOTA_1 - 1], rangoFila[COL_CUOTA_2 - 1], rangoFila[COL_CUOTA_3 - 1]];
-        let pagadasCount = 0;
-        if (String(c1).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_1')) pagadasCount++;
-        if (String(c2).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_2')) pagadasCount++;
-        if (String(c3).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_3')) pagadasCount++;
+        
+        if (String(c1).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_1')) {
+          pagadasCount++;
+          if (!cuotasPagadasNombres.includes("Cuota 1")) cuotasPagadasNombres.push("Cuota 1");
+        }
+        if (String(c2).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_2')) {
+          pagadasCount++;
+          if (!cuotasPagadasNombres.includes("Cuota 2")) cuotasPagadasNombres.push("Cuota 2");
+        }
+        if (String(c3).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_3')) {
+          pagadasCount++;
+          if (!cuotasPagadasNombres.includes("Cuota 3")) cuotasPagadasNombres.push("Cuota 3");
+        }
         
         if (pagadasCount >= cantidadCuotasRegistrada) {
-          esPagoTotal = true;
+          esPagoTotalCompleto = true; // Ahora se considera pago total
         }
       }
 
-      // Determinar el nuevo estado de pago
-      if (esPagoTotal) {
-        nuevoEstadoPago = esPagoFamiliar ? "Pago Total Familiar" : "Pago total en cuotas";
+      // --- 3. Determinar el NUEVO ESTADO DE PAGO (Reglas del Usuario) ---
+      if (esPagoTotalCompleto) {
+        if (metodoPagoHoja === 'Pago en Cuotas') {
+          nuevoEstadoPago = "Pago total en cuotas"; // Regla Pago Cuotas
+        } else if (esPagoFamiliar && (metodoPagoHoja === 'Transferencia' || metodoPagoHoja === 'Pago Efectivo (Adm del Club)')) {
+          nuevoEstadoPago = "Pago Total Familiar"; // Regla Familiar Transfer/Efectivo
+        } else {
+          // Individual Transfer/Efectivo
+          nuevoEstadoPago = "Pagado"; 
+        }
       } else {
-        nuevoEstadoPago = "Cuotas (En revisión)";
+        // Es un pago de cuota parcial
+        if (cuotasPagadasNombres.length > 0) {
+          nuevoEstadoPago = `Pago ${cuotasPagadasNombres.join(' y ')}`; // Ej: "Pago Cuota 1 y 2"
+        } else {
+          nuevoEstadoPago = "Cuotas (En revisión)"; // Fallback
+        }
       }
 
-      // Construir nombre de archivo
+      // --- 4. Construir el Nombre del Archivo (Reglas del Usuario) ---
+      let baseNombreArchivo = "";
       const metodoPagoSimple = metodoPagoHoja.replace(/[\s()]/g, '');
-      const estadoPagoSimple = nuevoEstadoPago.replace(/[\s()]/g, '');
-      let baseNombreArchivo = esPagoFamiliar ? `${dniHoja}_${apellidoHoja}_${metodoPagoSimple}_${estadoPagoSimple}` : `${dniHoja}_${apellidoHoja}_${nombreHoja}_${metodoPagoSimple}_${estadoPagoSimple}`;
-      const prefijoCuotas = cuotasSeleccionadas.map(c => c.replace('mp_', '')).join('-');
+      const estadoPagoSimple = nuevoEstadoPago.replace(/[\s()]/g, '_'); // Reemplaza espacios con guion bajo
+      
+      if (esPagoFamiliar) {
+        // Regla Familiar (Transfer/Efectivo Y Cuotas): "dni_apellido_Metodo_Estado"
+        baseNombreArchivo = `${dniHoja}_${apellidoHoja}_${metodoPagoSimple}_${estadoPagoSimple}`;
+      } else {
+        // Regla Individual (Transfer/Efectivo Y Cuotas): "dni_apellido_nombre_Metodo_Estado"
+        baseNombreArchivo = `${dniHoja}_${apellidoHoja}_${nombreHoja}_${metodoPagoSimple}_${estadoPagoSimple}`;
+      }
+
+      // Añadir prefijo de cuota (si es pago en cuotas)
+      // Usar los nombres de las cuotas que se están pagando AHORA
+      const prefijoCuotas = cuotasSeleccionadas.map(c => c.replace('mp_', '')).join('-'); // "cuota-1-cuota-2"
       if (metodoPagoHoja === 'Pago en Cuotas') {
          baseNombreArchivo = `${prefijoCuotas}_${baseNombreArchivo}`;
       }
+      
       const nombreArchivoLimpio = baseNombreArchivo.replace(/[^\w.-]/g, '_');
       const extension = (fileData.fileName.includes('.')) ? fileData.fileName.split('.').pop() : 'jpg';
       const nuevoNombreArchivo = `${nombreArchivoLimpio}.${extension}`;
+
       Logger.log(`Nuevo nombre de archivo: ${nuevoNombreArchivo}`);
-      
+
+      // --- 5. Subir el Archivo ---
       const fileUrl = uploadFileToDrive(fileData.data, fileData.mimeType, nuevoNombreArchivo, dniLimpio, 'comprobante');
       if (typeof fileUrl !== 'string' || !fileUrl.startsWith('http')) {
         throw new Error("Error al subir el archivo a Drive: " + (fileUrl.message || 'Error desconocido'));
       }
 
+      // --- 6. Aplicar Cambios a la Hoja ---
       const nombrePagador = datosExtras.nombrePagador;
       const dniPagador = datosExtras.dniPagador;
       let mensajeExito = "";
       
-      const aplicarCambios = (filaAfectada) => {
+      // (Función Helper para aplicar cambios)
+      const aplicarCambios = (filaAfectada, esTotal) => {
         hoja.getRange(filaAfectada, COL_PAGADOR_NOMBRE_MANUAL).setValue(nombrePagador);
         hoja.getRange(filaAfectada, COL_PAGADOR_DNI_MANUAL).setValue(dniPagador);
         hoja.getRange(filaAfectada, COL_ESTADO_PAGO).setValue(nuevoEstadoPago);
         
-        if (esPagoTotal) {
+        if (esTotal) {
+            // Si es pago total, se pone en la columna TOTAL (AQ) y se marcan las cuotas como Pagadas
             hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_TOTAL_EXT).setValue(fileUrl);
             hoja.getRange(filaAfectada, COL_CUOTA_1, 1, 3).setValues([["Pagada", "Pagada", "Pagada"]]);
         } else {
-            cuotasSeleccionadas.forEach(cuota => {
-                if(cuota === 'mp_cuota_1') hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA1).setValue(fileUrl);
-                if(cuota === 'mp_cuota_2') hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA2).setValue(fileUrl);
-                if(cuota === 'mp_cuota_3') hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA3).setValue(fileUrl);
+            // Si es pago de cuota parcial, se pone el link en la/s columna/s de cuota específica/s
+            cuotasPagadasAhora.forEach(cuota => {
+                if(cuota === 'mp_cuota_1') {
+                  hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA1).setValue(fileUrl); // AR
+                  hoja.getRange(filaAfectada, COL_CUOTA_1).setValue("Pagada (En revisión)"); // AE
+                }
+                if(cuota === 'mp_cuota_2') {
+                  hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA2).setValue(fileUrl); // AS
+                  hoja.getRange(filaAfectada, COL_CUOTA_2).setValue("Pagada (En revisión)"); // AF
+                }
+                if(cuota === 'mp_cuota_3') {
+                  hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA3).setValue(fileUrl); // AT
+                  hoja.getRange(filaAfectada, COL_CUOTA_3).setValue("Pagada (En revisión)"); // AG
+                }
             });
         }
       };
       
+      // --- (INICIO CORRECCIÓN BUG 3: Lógica Familiar para Cuotas Parciales) ---
       if (esPagoFamiliar) {
-        const idFamiliar = rangoFila[COL_VINCULO_PRINCIPAL - 1];
+        const idFamiliar = rangoFila[COL_VINCULO_PRINCIPAL - 1]; // AV (48)
         if (!idFamiliar) {
            Logger.log(`Pago Familiar marcado, pero no se encontró ID Familiar en fila ${fila}. Aplicando solo al DNI ${dniLimpio}.`);
-           aplicarCambios(fila);
+           aplicarCambios(fila, esPagoTotalCompleto);
         } else {
           const rangoVinculos = hoja.getRange(2, COL_VINCULO_PRINCIPAL, hoja.getLastRow() - 1, 1);
           const todasLasFilas = rangoVinculos.createTextFinder(idFamiliar).matchEntireCell(true).findAll();
           let nombresActualizados = [];
           todasLasFilas.forEach(celda => {
-            aplicarCambios(celda.getRow());
+            aplicarCambios(celda.getRow(), esPagoTotalCompleto); // Aplica el mismo tipo de pago (total o parcial) a todos
             nombresActualizados.push(hoja.getRange(celda.getRow(), COL_NOMBRE).getValue());
           });
           Logger.log(`Pago Familiar aplicado a ${nombresActualizados.length} miembros: ${nombresActualizados.join(', ')}`);
-          mensajeExito = `¡Pago Familiar Total registrado con éxito para ${nombresActualizados.length} inscriptos!<br>${mensajeFinalCompleto}`;
+          if(esPagoTotalCompleto) {
+            mensajeExito = `¡Pago Familiar Total registrado con éxito para ${nombresActualizados.length} inscriptos!<br>${mensajeFinalCompleto}`;
+          } else {
+            // Mensaje para pago de cuotas parciales familiares
+            mensajeExito = `Se registró el pago de ${cuotasPagadasNombres.join(' y ')} para ${nombresActualizados.length} inscriptos.`;
+          }
         }
       } else {
-        aplicarCambios(fila);
+        // Aplicación Individual
+        aplicarCambios(fila, esPagoTotalCompleto);
       }
+      // --- (FIN CORRECCIÓN BUG 3) ---
 
-      if (!mensajeExito) {
-         if (esPagoTotal) {
+      // --- 7. Formular Mensaje de Éxito ---
+      if (!mensajeExito) { // Si el mensaje no se seteó en el bloque familiar (porque fue individual)
+         if (esPagoTotalCompleto) {
             mensajeExito = mensajeFinalCompleto;
          } else {
-            const pendientes = cantidadCuotasRegistrada - hoja.getRange(fila, COL_CUOTA_1, 1, 3).getValues()[0].filter(c => String(c).startsWith("Pagada")).length;
-            mensajeExito = `Se registró el pago de la/s cuota/s.`;
+            // Quedó en "Pago Cuota X y Y" o "En revisión"
+            // Volver a leer la fila para obtener los datos más actualizados de las cuotas
+            const cuotasActuales = hoja.getRange(fila, COL_CUOTA_1, 1, 3).getValues()[0];
+            const pagadasActuales = cuotasActuales.filter(c => String(c).startsWith("Pagada")).length;
+            const pendientes = cantidadCuotasRegistrada - pagadasActuales;
+            
+            mensajeExito = `Se registró el pago de: ${cuotasPagadasNombres.join(' y ')}.`;
+            
+            if (pendientes > 0) {
+              mensajeExito += ` Le quedan ${pendientes} cuota${pendientes > 1 ? 's' : ''} pendiente${pendientes > 1 ? 's' : ''}.`;
+            } else {
+              // Esto no debería pasar si la lógica de esPagoTotal es correcta, pero es un buen fallback
+              mensajeExito = `¡Felicidades! Ha completado todas las cuotas.<br>${mensajeFinalCompleto}`;
+            }
          }
       }
 
       Logger.log(`Comprobante subido para DNI ${dniLimpio}. Estado final: ${nuevoEstadoPago}. ¿Familiar?: ${esPagoFamiliar}`);
       return { status: 'OK', message: mensajeExito, estadoPago: nuevoEstadoPago };
+
     } else {
-      return { status: 'ERROR', message: `No se encontró el registro para el DNI ${dniLimpio}.` };
+      Logger.log(`No se encontró DNI ${dniLimpio} para subir comprobante manual.`);
+      return { status: 'ERROR', message: `No se encontró el registro para el DNI ${dniLimpio}. Asegúrese de que el DNI del inscripto sea correcto.` };
     }
+
   } catch (e) {
     Logger.log("Error en subirComprobanteManual: " + e.toString() + " Stack: " + e.stack);
     return { status: 'ERROR', message: 'Error en el servidor: ' + e.message };
@@ -316,6 +389,12 @@ function subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras,
   }
 }
 
+
+/**
+ * (MODIFICADO)
+ * Sube un archivo a Drive con un nombre de archivo específico.
+ * Devuelve un =HYPERLINK() para la hoja de cálculo.
+ */
 function uploadFileToDrive(data, mimeType, newFilename, dni, tipoArchivo) {
   try {
     if (!dni) return { status: 'ERROR', message: 'No se recibió DNI.' };
@@ -339,7 +418,11 @@ function uploadFileToDrive(data, mimeType, newFilename, dni, tipoArchivo) {
     const blob = Utilities.newBlob(decodedData, mimeType, newFilename); 
     const file = subFolder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    return file.getUrl();
+    
+    // --- (MODIFICACIÓN) ---
+    // Devolver la URL con el nombre de archivo como hipervínculo para la hoja
+    return `=HYPERLINK("${file.getUrl()}"; "${newFilename}")`;
+    // --- (FIN MODIFICACIÓN) ---
 
   } catch (e) {
     Logger.log('Error en uploadFileToDrive: ' + e.toString());
@@ -351,6 +434,9 @@ function uploadFileToDrive(data, mimeType, newFilename, dni, tipoArchivo) {
 // --- (FIN DE MODIFICACIÓN) ---
 // =========================================================
 
+/**
+ * Permite a un usuario ya registrado editar campos específicos.
+ */
 function actualizarDatosPersonales(dni, datosEditados) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -371,10 +457,22 @@ function actualizarDatosPersonales(dni, datosEditados) {
       if (datosEditados.adultoResponsable2 !== undefined) hoja.getRange(fila, COL_ADULTO_RESPONSABLE_2).setValue(datosEditados.adultoResponsable2);
       if (datosEditados.telResp2 !== undefined) hoja.getRange(fila, COL_TEL_RESPONSABLE_2).setValue(datosEditados.telResp2);
       if (datosEditados.personasAutorizadas !== undefined) hoja.getRange(fila, COL_PERSONAS_AUTORIZADAS).setValue(datosEditados.personasAutorizadas);
-      if (datosEditados.urlCertificadoAptitud !== undefined && datosEditados.urlCertificadoAptitud !== "") hoja.getRange(fila, COL_APTITUD_FISICA).setValue(datosEditados.urlCertificadoAptitud);
+      
+      // --- (MODIFICACIÓN) ---
+      // Solo actualiza si se subió un *nuevo* certificado. 
+      // El nombre del archivo ahora se genera aquí.
+      if (datosEditados.urlCertificadoAptitud !== undefined && datosEditados.urlCertificadoAptitud.startsWith('http')) {
+        const extension = (datosEditados.urlCertificadoAptitud.includes('.')) ? datosEditados.urlCertificadoAptitud.split('.').pop() : 'pdf';
+        const nuevoNombreAptitud = `AptitudFisica_${dniLimpio}.${extension}`;
+        const formulaLink = `=HYPERLINK("${datosEditados.urlCertificadoAptitud}"; "${nuevoNombreAptitud}")`;
+        hoja.getRange(fila, COL_APTITUD_FISICA).setValue(formulaLink);
+      }
+      // --- (FIN MODIFICACIÓN) ---
+
       Logger.log(`Datos personales actualizados para DNI ${dniLimpio} en fila ${fila}.`);
       return { status: 'OK', message: '¡Datos actualizados con éxito!' };
     } else {
+      Logger.log(`No se encontró DNI ${dniLimpio} para actualizar datos personales.`);
       return { status: 'ERROR', message: `No se encontró el registro para el DNI ${dniLimpio}.` };
     }
   } catch (e) {
@@ -384,6 +482,7 @@ function actualizarDatosPersonales(dni, datosEditados) {
     lock.releaseLock();
   }
 }
+
 
 function aplicarColorGrupo(hoja, fila, textoGrupo, hojaConfig) {
   try {
@@ -400,6 +499,7 @@ function aplicarColorGrupo(hoja, fila, textoGrupo, hojaConfig) {
     Logger.log(`Error al aplicar color para el grupo ${textoGrupo} en fila ${fila}: ${e.message}`);
   }
 }
+
 
 function limpiarDNI(dni) {
   if (!dni) return '';
@@ -518,11 +618,20 @@ function validarAcceso(dni, tipoInscripto) {
   }
 }
 
+/**
+* (MODIFICADO)
+* - (BUG 1) Añade nombre y apellido al objeto `datosParaEdicion` para fijar el `undefined undefined`.
+* - (BUG 2) Añade bloque de limpieza para corregir datos de cuotas inconsistentes (Pendiente vs Pagada).
+* - (BUG 3) Envía `cuotasPagadas` (array) y `cuotasPendientes` (número) al cliente.
+*/
 function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio, estado, tipoInscripto, pagoTotalMPVisible) {
-  const rangoFila = hojaRegistro.getRange(filaRegistro, 1, 1, hojaRegistro.getLastColumn()).getValues()[0];
+  let rangoFila = hojaRegistro.getRange(filaRegistro, 1, 1, hojaRegistro.getLastColumn()).getValues()[0];
+  
   const estadoPago = rangoFila[COL_ESTADO_PAGO - 1];
   const metodoPago = rangoFila[COL_METODO_PAGO - 1];
-  const nombreRegistrado = rangoFila[COL_NOMBRE - 1] + ' ' + rangoFila[COL_APELLIDO - 1];
+  const nombreRegistrado = rangoFila[COL_NOMBRE - 1]; // <-- SÓLO NOMBRE
+  const apellidoRegistrado = rangoFila[COL_APELLIDO - 1]; // <-- SÓLO APELLIDO
+  const nombreCompleto = `${nombreRegistrado} ${apellidoRegistrado}`;
   const estadoInscripto = rangoFila[COL_ESTADO_NUEVO_ANT - 1];
   const estadoInscriptoTrim = estadoInscripto ? String(estadoInscripto).trim().toLowerCase() : "";
 
@@ -530,17 +639,28 @@ function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio,
     return { status: 'ERROR', message: `Este DNI ya está registrado como "${estadoInscripto}". Por favor, seleccione esa opción y valide de nuevo.` };
   }
 
-  // --- (MODIFICACIÓN) ---
-  // Añadir flag para saber si tiene hermanos y enviarlo al cliente
   const idFamiliar = rangoFila[COL_VINCULO_PRINCIPAL - 1];
   let tieneHermanos = false;
   if (idFamiliar) {
     const count = hojaRegistro.getRange(2, COL_VINCULO_PRINCIPAL, hojaRegistro.getLastRow() - 1, 1).getValues().filter(v => v[0] == idFamiliar).length;
     if (count > 1) tieneHermanos = true;
   }
-  // --- (FIN MODIFICACIÓN) ---
   
-  const datosParaEdicion = { dni: dniLimpio, email: rangoFila[COL_EMAIL - 1] || '', adultoResponsable1: rangoFila[COL_ADULTO_RESPONSABLE_1 - 1] || '', dniResponsable1: rangoFila[COL_DNI_RESPONSABLE_1 - 1] || '', telResponsable1: rangoFila[COL_TEL_RESPONSABLE_1 - 1] || '', adultoResponsable2: rangoFila[COL_ADULTO_RESPONSABLE_2 - 1] || '', telResponsable2: rangoFila[COL_TEL_RESPONSABLE_2 - 1] || '', personasAutorizadas: rangoFila[COL_PERSONAS_AUTORIZADAS - 1] || '', urlCertificadoAptitud: rangoFila[COL_APTITUD_FISICA - 1] || '' };
+  // --- (INICIO CORRECCIÓN BUG 1: undefined undefined) ---
+  const datosParaEdicion = { 
+    dni: dniLimpio, 
+    nombre: nombreRegistrado, // <-- AÑADIDO
+    apellido: apellidoRegistrado, // <-- AÑADIDO
+    email: rangoFila[COL_EMAIL - 1] || '', 
+    adultoResponsable1: rangoFila[COL_ADULTO_RESPONSABLE_1 - 1] || '', 
+    dniResponsable1: rangoFila[COL_DNI_RESPONSABLE_1 - 1] || '', 
+    telResponsable1: rangoFila[COL_TEL_RESPONSABLE_1 - 1] || '', 
+    adultoResponsable2: rangoFila[COL_ADULTO_RESPONSABLE_2 - 1] || '', 
+    telResponsable2: rangoFila[COL_TEL_RESPONSABLE_2 - 1] || '', 
+    personasAutorizadas: rangoFila[COL_PERSONAS_AUTORIZADAS - 1] || '', 
+    urlCertificadoAptitud: rangoFila[COL_APTITUD_FISICA - 1] || '' 
+  };
+  // --- (FIN CORRECCIÓN BUG 1) ---
   
   if (estadoInscriptoTrim.includes('hermano/a') && !metodoPago) { 
     let faltantes = [];
@@ -549,40 +669,286 @@ function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio,
     if (!rangoFila[COL_JORNADA - 1]) faltantes.push('Jornada');
     if (!rangoFila[COL_METODO_PAGO - 1]) faltantes.push('Método de Pago');
     
-    const datosCompletos = { ...datosParaEdicion, nombre: rangoFila[COL_NOMBRE - 1], apellido: rangoFila[COL_APELLIDO - 1], fechaNacimiento: rangoFila[COL_FECHA_NACIMIENTO_REGISTRO - 1] ? Utilities.formatDate(new Date(rangoFila[COL_FECHA_NACIMIENTO_REGISTRO - 1]), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd') : '', obraSocial: rangoFila[COL_OBRA_SOCIAL - 1] || '', colegioJardin: rangoFila[COL_COLEGIO_JARDIN - 1] || '' };
+    const datosCompletos = { ...datosParaEdicion, fechaNacimiento: rangoFila[COL_FECHA_NACIMIENTO_REGISTRO - 1] ? Utilities.formatDate(new Date(rangoFila[COL_FECHA_NACIMIENTO_REGISTRO - 1]), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd') : '', obraSocial: rangoFila[COL_OBRA_SOCIAL - 1] || '', colegioJardin: rangoFila[COL_COLEGIO_JARDIN - 1] || '' };
     return { status: 'HERMANO_COMPLETAR', message: `⚠️ ¡Hola ${datosCompletos.nombre}! Eres un hermano/a pre-registrado. Por favor, complete/verifique TODOS los campos.`, datos: datosCompletos, jornadaExtendidaAlcanzada: estado.jornadaExtendidaAlcanzada, tipoInscripto: estadoInscripto, pagoTotalMPVisible: pagoTotalMPVisible };
   }
 
+  const cantidadCuotasRegistrada = parseInt(rangoFila[COL_CANTIDAD_CUOTAS - 1]) || 3; // Asumir 3 si es 0
+  
   let estadoPagoActual = estadoPago;
   const c_total = rangoFila[COL_COMPROBANTE_MANUAL_TOTAL_EXT - 1], c_c1 = rangoFila[COL_COMPROBANTE_MANUAL_CUOTA1 - 1], c_c2 = rangoFila[COL_COMPROBANTE_MANUAL_CUOTA2 - 1], c_c3 = rangoFila[COL_COMPROBANTE_MANUAL_CUOTA3 - 1];
   const tieneComprobantes = c_total || c_c1 || c_c2 || c_c3;
 
-  if (!tieneComprobantes && (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Total'))) {
+  // Lógica para resetear estado si los comprobantes fueron borrados
+  if (!tieneComprobantes && (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Total') || String(estadoPagoActual).includes('Pago Cuota'))) {
     Logger.log(`Corrección de estado para DNI ${dniLimpio}: El estado era '${estadoPagoActual}' pero no hay comprobantes. Reseteando.`);
-    estadoPagoActual = metodoPago === 'Pago en Cuotas' ? `Pendiente (${rangoFila[COL_CANTIDAD_CUOTAS - 1] || 3} Cuotas)` : "Pendiente (Transferencia)";
+    estadoPagoActual = metodoPago === 'Pago en Cuotas' ? `Pendiente (${cantidadCuotasRegistrada} Cuotas)` : "Pendiente (Transferencia)";
     hojaRegistro.getRange(filaRegistro, COL_ESTADO_PAGO).setValue(estadoPagoActual);
     hojaRegistro.getRange(filaRegistro, COL_CUOTA_1, 1, 3).clearContent();
-  }
-
-  const baseResponse = { status: 'REGISTRO_ENCONTRADO', adeudaAptitud: !rangoFila[COL_APTITUD_FISICA - 1], metodoPago: metodoPago, pagoTotalMPVisible: pagoTotalMPVisible, datos: datosParaEdicion, tieneHermanos: tieneHermanos };
-
-  if (String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Pago Total')) {
-    return { ...baseResponse, message: `✅ El DNI ${dniLimpio} (${nombreRegistrado}) ya se encuentra REGISTRADO y la inscripción está PAGADA (${estadoPagoActual}).`, proximaCuotaPendiente: null };
+    // Volver a leer la fila con los datos limpios
+    rangoFila = hojaRegistro.getRange(filaRegistro, 1, 1, hojaRegistro.getLastColumn()).getValues()[0];
   }
   
+  // --- (INICIO CORRECCIÓN BUG 2: Limpieza de datos inconsistentes) ---
+  // Si el estado principal es "Pendiente" pero las cuotas dicen "Pagada", es un error. Limpiar.
+  if (String(estadoPagoActual).startsWith("Pendiente") && (String(rangoFila[COL_CUOTA_1 - 1]).startsWith("Pagada") || String(rangoFila[COL_CUOTA_2 - 1]).startsWith("Pagada") || String(rangoFila[COL_CUOTA_3 - 1]).startsWith("Pagada"))) {
+    Logger.log(`Corrigiendo datos inconsistentes para DNI ${dniLimpio}: El estado era ${estadoPagoActual} pero las cuotas estaban pagadas. Reseteando cuotas.`);
+    hojaRegistro.getRange(filaRegistro, COL_CUOTA_1, 1, 3).clearContent();
+    // Volver a leer los datos de la fila AHORA que están limpios
+    rangoFila = hojaRegistro.getRange(filaRegistro, 1, 1, hojaRegistro.getLastColumn()).getValues()[0];
+  }
+  // --- (FIN CORRECCIÓN BUG 2) ---
+
+  // --- (INICIO CORRECCIÓN BUG 3: Envío de datos de cuotas) ---
   let proximaCuotaPendiente = null;
+  let cuotasPendientes = 0;
+  let cuotasPagadas = []; // Array de strings, ej: ['mp_cuota_1']
+  
   if (metodoPago === 'Pago en Cuotas') {
     const cuotas = [rangoFila[COL_CUOTA_1 - 1], rangoFila[COL_CUOTA_2 - 1], rangoFila[COL_CUOTA_3 - 1]];
-    if (!String(cuotas[0]).startsWith("Pagada")) proximaCuotaPendiente = "C1";
-    else if (!String(cuotas[1]).startsWith("Pagada")) proximaCuotaPendiente = "C2";
-    else if (!String(cuotas[2]).startsWith("Pagada")) proximaCuotaPendiente = "C3";
+    
+    if (String(cuotas[0]).startsWith("Pagada")) {
+      cuotasPagadas.push('mp_cuota_1');
+    } else {
+      proximaCuotaPendiente = "C1"; // La próxima es C1
+    }
+    
+    if (String(cuotas[1]).startsWith("Pagada")) {
+      cuotasPagadas.push('mp_cuota_2');
+    } else if (!proximaCuotaPendiente) { // Si C1 está paga, la próxima es C2
+      proximaCuotaPendiente = "C2";
+    }
+    
+    if (String(cuotas[2]).startsWith("Pagada")) {
+      cuotasPagadas.push('mp_cuota_3');
+    } else if (!proximaCuotaPendiente) { // Si C1 y C2 están pagas, la próxima es C3
+      proximaCuotaPendiente = "C3";
+    }
+    
+    cuotasPendientes = cantidadCuotasRegistrada - cuotasPagadas.length;
   }
+  
+  const baseResponse = { 
+    status: 'REGISTRO_ENCONTRADO', 
+    adeudaAptitud: !rangoFila[COL_APTITUD_FISICA - 1], 
+    metodoPago: metodoPago, 
+    pagoTotalMPVisible: pagoTotalMPVisible, 
+    datos: datosParaEdicion, 
+    tieneHermanos: tieneHermanos,
+    cantidadCuotasRegistrada: cantidadCuotasRegistrada,
+    cuotasPagadas: cuotasPagadas, // <-- AÑADIDO
+    cuotasPendientes: cuotasPendientes // <-- AÑADIDO
+  };
+  // --- (FIN CORRECCIÓN BUG 3) ---
 
-  if (String(estadoPagoActual).includes('En revisión')) {
-    let mensajeRevision = `⚠️ El DNI ${dniLimpio} (${nombreRegistrado}) ya se encuentra REGISTRADO. Su pago está "En revisión".`;
-    if (proximaCuotaPendiente) mensajeRevision += ` Le quedan cuotas pendientes.`;
+  if (String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Pago Total') || String(estadoPagoActual).includes('Pago total')) {
+    return { ...baseResponse, message: `✅ El DNI ${dniLimpio} (${nombreCompleto}) ya se encuentra REGISTRADO y la inscripción está PAGADA (${estadoPagoActual}).`, proximaCuotaPendiente: null, cuotasPendientes: 0 };
+  }
+  
+  if (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pago Cuota')) {
+    let mensajeRevision = `⚠️ El DNI ${dniLimpio} (${nombreCompleto}) ya se encuentra REGISTRADO. Estado: ${estadoPagoActual}.`;
+    if (cuotasPendientes > 0) mensajeRevision += ` Le quedan ${cuotasPendientes} cuota${cuotasPendientes > 1 ? 's' : ''} pendiente${cuotasPendientes > 1 ? 's' : ''}.`;
     return { ...baseResponse, message: mensajeRevision, proximaCuotaPendiente: proximaCuotaPendiente };
   }
 
-  return { ...baseResponse, message: `⚠️ El DNI ${dniLimpio} (${nombreRegistrado}) ya se encuentra REGISTRADO. El pago (${metodoPago}) está PENDIENTE.`, proximaCuotaPendiente: proximaCuotaPendiente || 'subir_comprobante_manual' };
+  // Estado Pendiente (Transferencia, Efectivo, o Cuotas inicial)
+  let mensajePendiente = `⚠️ El DNI ${dniLimpio} (${nombreCompleto}) ya se encuentra REGISTRADO. El pago (${metodoPago}) está PENDIENTE.`;
+  if (metodoPago === 'Pago en Cuotas') {
+     // El mensaje ya se arma con la info de cuotasPendientes
+     mensajePendiente = `⚠️ El DNI ${dniLimpio} (${nombreCompleto}) ya se encuentra REGISTRADO. El pago (${metodoPago}) está PENDIENTE. Tiene ${cuotasPendientes} cuota${cuotasPendientes !== 1 ? 's' : ''} pendiente${cuotasPendientes !== 1 ? 's' : ''}.`;
+  }
+  
+  return { ...baseResponse, message: mensajePendiente, proximaCuotaPendiente: proximaCuotaPendiente, estadoPago: estadoPagoActual };
+}
+
+
+/**
+* (MODIFICADO)
+* - Acepta `fileData.fileName` para usarlo en la creación del nombre de archivo.
+*/
+function subirArchivoIndividual(fileData, dni, tipoArchivo) {
+  try {
+    if (!fileData || !dni || !tipoArchivo) {
+      return { status: 'ERROR', message: 'Faltan datos para la subida (DNI, archivo o tipo).' };
+    }
+    const dniLimpio = limpiarDNI(dni);
+
+    // --- (INICIO MODIFICACIÓN NOMBRE DE ARCHIVO) ---
+    let nuevoNombre = fileData.fileName; // Por defecto usa el nombre ya construido
+    const extension = (fileData.fileName.includes('.')) ? fileData.fileName.split('.').pop() : 'jpg';
+
+    if (tipoArchivo === 'foto') {
+      nuevoNombre = `FotoCarnet_${dniLimpio}.${extension}`;
+    } else if (tipoArchivo === 'ficha') {
+      nuevoNombre = `AptitudFisica_${dniLimpio}.${extension}`;
+    }
+    // Si es 'comprobante', el nombre ya viene pre-formateado desde 'subirComprobanteManual'
+    
+    const fileUrl = uploadFileToDrive(
+      fileData.data,
+      fileData.mimeType,
+      nuevoNombre, // Usamos el nombre nuevo
+      dniLimpio,
+      tipoArchivo
+    );
+    // --- (FIN MODIFICACIÓN) ---
+
+    if (typeof fileUrl === 'object' && fileUrl.status === 'ERROR') {
+      return fileUrl;
+    }
+    
+    // Devuelve la URL simple, el =HYPERLINK se genera en la función que lo llama
+    return { status: 'OK', url: fileUrl.replace("=HYPERLINK(\"", "").split("\";")[0] };
+
+  } catch (e) {
+    Logger.log("Error en subirArchivoIndividual: " + e.toString());
+    return { status: 'ERROR', message: 'Error del servidor al subir: ' + e.message };
+  }
+}
+
+/**
+* (MODIFICADO)
+* - Genera el =HYPERLINK() aquí
+*/
+function subirAptitudManual(dni, fileData) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const dniLimpio = limpiarDNI(dni);
+    if (!dniLimpio || !fileData) {
+      return { status: 'ERROR', message: 'Faltan datos (DNI o archivo).' };
+    }
+    
+    const extension = (fileData.fileName.includes('.')) ? fileData.fileName.split('.').pop() : 'pdf';
+    const nuevoNombreAptitud = `AptitudFisica_${dniLimpio}.${extension}`;
+    
+    const fileUrlFormula = uploadFileToDrive(fileData.data, fileData.mimeType, nuevoNombreAptitud, dniLimpio, 'ficha');
+
+    if (typeof fileUrlFormula !== 'string' || !fileUrlFormula.startsWith('=HYPERLINK')) {
+      throw new Error("Error al subir el archivo a Drive.");
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const hoja = ss.getSheetByName(NOMBRE_HOJA_REGISTRO);
+    if (!hoja) throw new Error(`La hoja "${NOMBRE_HOJA_REGISTRO}" no fue encontrada.`);
+
+    const rangoDni = hoja.getRange(2, COL_DNI_INSCRIPTO, hoja.getLastRow() - 1, 1);
+    const celdaEncontrada = rangoDni.createTextFinder(dniLimpio).matchEntireCell(true).findNext();
+
+    if (celdaEncontrada) {
+      const fila = celdaEncontrada.getRow();
+      hoja.getRange(fila, COL_APTITUD_FISICA).setValue(fileUrlFormula); // Guardar la fórmula
+
+      Logger.log(`Aptitud Física subida para DNI ${dniLimpio} en fila ${fila}.`);
+      return { status: 'OK', message: '¡Certificado de Aptitud subido con éxito!' };
+    } else {
+      Logger.log(`No se encontró DNI ${dniLimpio} para subir aptitud física.`);
+      return { status: 'ERROR', message: `No se encontró el registro para el DNI ${dniLimpio}.` };
+    }
+
+  } catch (e) {
+    Logger.log("Error en subirAptitudManual: " + e.toString());
+    return { status: 'ERROR', message: 'Error en el servidor: ' + e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function validarDNIHermano(dniHermano, dniPrincipal) {
+  try {
+    const dniLimpio = limpiarDNI(dniHermano);
+    const dniPrincipalLimpio = limpiarDNI(dniPrincipal);
+
+    if (!/^[0-9]{8}$/.test(dniLimpio)) {
+      return { status: 'ERROR', message: 'El DNI del hermano/a debe tener 8 dígitos.' };
+    }
+    if (dniLimpio === dniPrincipalLimpio) {
+      return { status: 'ERROR', message: 'El DNI del hermano/a no puede ser igual al del inscripto principal.' };
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+    // 1. Chequear duplicados en Registros
+    const hojaRegistro = ss.getSheetByName(NOMBRE_HOJA_REGISTRO);
+    if (hojaRegistro && hojaRegistro.getLastRow() > 1) {
+      const rangoDniRegistro = hojaRegistro.getRange(2, COL_DNI_INSCRIPTO, hojaRegistro.getLastRow() - 1, 1);
+      const celdaRegistro = rangoDniRegistro.createTextFinder(dniLimpio).matchEntireCell(true).findNext();
+      if (celdaRegistro) {
+        return { status: 'ERROR', message: `El DNI ${dniLimpio} ya se encuentra registrado en la base de datos (Fila ${celdaRegistro.getRow()}). No se puede agregar como hermano.` };
+      }
+    }
+
+    // 2. Chequear en PRE-VENTA
+    const hojaPreventa = ss.getSheetByName(NOMBRE_HOJA_PREVENTA);
+    if (hojaPreventa && hojaPreventa.getLastRow() > 1) {
+      const rangoDniPreventa = hojaPreventa.getRange(2, COL_PREVENTA_DNI, hojaPreventa.getLastRow() - 1, 1);
+      const celdaEncontradaPreventa = rangoDniPreventa.createTextFinder(dniLimpio).matchEntireCell(true).findNext(); 
+      
+      if (celdaEncontradaPreventa) { 
+        const fila = hojaPreventa.getRange(celdaEncontradaPreventa.getRow(), 1, 1, hojaPreventa.getLastColumn()).getValues()[0];
+        const fechaNacimientoRaw = fila[COL_PREVENTA_FECHA_NAC - 1];
+        const fechaNacimientoStr = (fechaNacimientoRaw instanceof Date) ? Utilities.formatDate(fechaNacimientoRaw, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd') : '';
+        
+        return {
+          status: 'OK_PREVENTA',
+          message: '¡DNI de Pre-Venta encontrado! Se autocompletarán los datos del hermano/a.',
+          datos: {
+            dni: dniLimpio,
+            nombre: fila[COL_PREVENTA_NOMBRE - 1],
+            apellido: fila[COL_PREVENTA_APELLIDO - 1],
+            fechaNacimiento: fechaNacimientoStr,
+            obraSocial: '', 
+            colegio: ''     
+          }
+        };
+      }
+    }
+
+    // 3. Chequear en Base de Datos (Anteriores)
+    const hojaBusqueda = ss.getSheetByName(NOMBRE_HOJA_BUSQUEDA);
+    if (hojaBusqueda && hojaBusqueda.getLastRow() > 1) {
+      const rangoDNI = hojaBusqueda.getRange(2, COL_DNI_BUSQUEDA, hojaBusqueda.getLastRow() - 1, 1);
+      
+      const celdaEncontrada_BD = rangoDNI.createTextFinder(dniLimpio).matchEntireCell(true).findNext();
+      
+      if (celdaEncontrada_BD) { 
+        const fila = hojaBusqueda.getRange(celdaEncontrada_BD.getRow(), COL_HABILITADO_BUSQUEDA, 1, 10).getValues()[0]; 
+
+        const fechaNacimientoRaw = fila[COL_FECHA_NACIMIENTO_BUSQUEDA - COL_HABILITADO_BUSQUEDA]; // Col E (idx 3)
+        const fechaNacimientoStr = (fechaNacimientoRaw instanceof Date) ? Utilities.formatDate(fechaNacimientoRaw, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd') : '';
+        
+        return {
+          status: 'OK_ANTERIOR',
+          message: '¡DNI de Inscripto Anterior encontrado! Se autocompletarán los datos del hermano/a.',
+          datos: {
+            dni: dniLimpio,
+            nombre: fila[COL_NOMBRE_BUSQUEDA - COL_HABILITADO_BUSQUEDA], // Col C (idx 1)
+            apellido: fila[COL_APELLIDO_BUSQUEDA - COL_HABILITADO_BUSQUEDA], // Col D (idx 2)
+            fechaNacimiento: fechaNacimientoStr,
+            obraSocial: String(fila[COL_OBRASOCIAL_BUSQUEDA - COL_HABILITADO_BUSQUEDA] || '').trim(), // Col H (idx 6)
+            colegio: String(fila[COL_COLEGIO_BUSQUEDA - COL_HABILITADO_BUSQUEDA] || '').trim()  // Col I (idx 7)
+          }
+        };
+      }
+    }
+
+    // 4. No encontrado (Nuevo)
+    return {
+      status: 'OK_NUEVO',
+      message: 'DNI no encontrado en Pre-Venta ni en registros Anteriores. Por favor, complete todos los datos del hermano/a.',
+      datos: {
+        dni: dniLimpio,
+        nombre: '',
+        apellido: '',
+        fechaNacimiento: '',
+        obraSocial: '',
+        colegio: ''
+      }
+    };
+
+  } catch (e) {
+    Logger.log("Error en validarDNIHermano: " + e.message);
+    return { status: 'ERROR', message: 'Error del servidor: ' + e.message };
+  }
 }

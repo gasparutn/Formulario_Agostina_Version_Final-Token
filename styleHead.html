@@ -81,7 +81,7 @@
     cursor: pointer;
     font-size: 0.9em;
     margin-top: 10px;
-    transition: background-color 0.3s;
+    transition: background-color: 0.3s;
   }
 
   #btn-copiar-alias:hover, #btn-copiar-alias-cuotas:hover {
@@ -140,7 +140,7 @@
     color: #555555;
   }
   
-  /* (NUEVO) Estilo para el aviso de fecha de cuota en la pantalla de RE-PAGO */
+  /* (MODIFICADO) Estilo para el aviso de fecha de cuota en la pantalla de RE-PAGO */
   .mensaje-cuota {
     background-color: #fff3cd;
     color: #856404;
@@ -149,7 +149,7 @@
     border-radius: 5px;
     margin-bottom: 15px;
     font-weight: bold;
-    text-align: center;
+    text-align: justify; /* <-- MODIFICADO */
   }
 
   /* (MODIFICADO) Estilos para los checkboxes de Pago Familiar y Cuotas */
@@ -176,7 +176,25 @@
     margin: 0;
     font-weight: bold;
     color: #495057; 
+    display: flex; /* Para alinear el (Ya Pagada) */
+    align-items: center;
   }
+  
+  /* (NUEVO) Estilos para checkboxes deshabilitados */
+  .cuota-checkbox-item input[type="checkbox"]:disabled {
+    accent-color: #adb5bd;
+  }
+  .cuota-checkbox-item label.disabled {
+    color: #6c757d;
+    cursor: not-allowed;
+  }
+  .cuota-checkbox-item label.disabled strong {
+    color: var(--color-exito);
+    margin-left: 5px;
+    font-size: 0.9em;
+    text-decoration: none; /* Quitar el tachado del strong */
+  }
+
 
   .cuota-checkbox-container {
     margin-top: 10px;
@@ -185,7 +203,7 @@
   .cuota-checkbox-item {
     display: flex;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: 10px; /* Más espacio */
   }
 
 </style>

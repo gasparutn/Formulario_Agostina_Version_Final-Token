@@ -123,6 +123,14 @@ function handleValidacionHermanoFailure(error) {
   document.getElementById('status-hermano-modal').innerHTML = `<div class="mensaje error">Error de conexión: ${error.message}</div>`;
 }
 
+/**
+* (MODIFICADO)
+* - Corrige los mensajes para "Pago en Cuotas" pendiente.
+* - Utiliza 'response.cuotasPendientes' y 'response.cuotasPagadas'
+* - Deshabilita los checkboxes de cuotas ya pagadas.
+* - Corrige bug 'undefined undefined' usando `response.datos.nombre` y `apellido`.
+* - Muestra la casilla "familiar" SIEMPRE si `tieneHermanos` es true.
+*/
 function handleValidationSuccess(response) {
   document.getElementById('btn-validar').disabled = false;
   document.getElementById('loader-validacion').style.display = 'none';
@@ -141,41 +149,116 @@ function handleValidationSuccess(response) {
     iniciarTemporizador(response);
   } else if (response.status === 'REGISTRO_ENCONTRADO') {
     let html = '';
-    const proximaCuotaMsg = response.proximaCuotaPendiente && !response.message.includes('PAGADO') ? `<br><strong>Próxima Cuota Pendiente: ${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.` : '';
+    
+    // --- (INICIO CORRECCIÓN MENSAJES) ---
+    // (Arregla "undefined undefined")
+    const nombreCompleto = (response.datos && response.datos.nombre) ? `${response.datos.nombre} ${response.datos.apellido}` : 'Usuario';
 
-    if (response.message.includes('PAGADA') || response.message.includes('PAGADO') || response.message.includes('Pago Total')) {
+    // Si está pagado (con los nuevos estados)
+    if (response.message.includes('PAGADA') || response.message.includes('PAGADO') || response.message.includes('Pago Total') || response.message.includes('Pago total')) {
       html += `<div class="mensaje exito" style="margin-bottom:10px; text-align:left;"><strong>${response.message}</strong></div>`;
-    } else {
-      let msgPago = response.message_pago ? `<br>${response.message_pago}` : '';
-      html += `<div class="mensaje aviso" style="margin-bottom:10px; text-align:left;"><strong>${response.message}</strong>${msgPago}${proximaCuotaMsg}</div>`;
+    } 
+    // Si está pendiente (o en revisión) y es "Pago en Cuotas"
+    else if (response.metodoPago === 'Pago en Cuotas') {
+      const cantCuotas = response.cantidadCuotasRegistrada || 3;
+      const pendientes = response.cuotasPendientes;
+      
+      let cuotaMsg = `Tiene ${pendientes} cuota${pendientes !== 1 ? 's' : ''} pendiente${pendientes !== 1 ? 's' : ''} de ${cantCuotas}.`;
+      
+      // Si el estado es "Pago Cuota 1" o "En revisión", se muestra
+      if (response.estadoPago && (response.estadoPago.includes('En revisión') || response.estadoPago.includes('Pago Cuota'))) {
+         cuotaMsg = `Su estado de pago es: <strong>${response.estadoPago}</strong>. ${cuotaMsg}`;
+      }
+      
+      html += `<div class="mensaje aviso" style="margin-bottom:10px; text-align:left;"><strong>⚠️ ${nombreCompleto} ya se encuentra REGISTRADO.</strong><br>${cuotaMsg}</div>`;
+    } 
+    // Si está pendiente y es Transferencia/Efectivo
+    else {
+      // Reemplaza el nombre "undefined undefined" en el mensaje del servidor
+      const mensajeCorregido = response.message.replace('undefined undefined', nombreCompleto);
+      html += `<div class="mensaje aviso" style="margin-bottom:10px; text-align:left;"><strong>${mensajeCorregido}</strong></div>`;
     }
+    // --- (FIN CORRECCIÓN MENSAJES) ---
 
     if (response.adeudaAptitud === true) {
       html += `<div id="aptitud-manual-seccion" style="margin-top: 15px; padding: 10px; border: 1px solid #e67e22; border-radius: 5px; background: #fdf5e6;"><h3>¡Atención!</h3><p style="text-align: center; font-weight: bold; color: #e67e22;">Adeuda Certificado de Aptitud Física</p><p>Por favor, suba el certificado para completar la ficha.</p><label for="aptitud-manual-upload" class="file-input-label" style="background-color: #e67e22;">Seleccionar Certificado</label><input type="file" id="aptitud-manual-upload" accept="image/jpeg, image/png, application/pdf"><span id="aptitud-manual-name" class="file-name">Ningún archivo seleccionado</span><button type="button" id="btn-submit-aptitud-manual" style="background-color: #e67e22; width: 100%; height:45px">Subir Certificado!!!</button><div class="loader" id="loader-aptitud" style="display: none;"><div class="spinner"></div><p>Subiendo...</p></div></div>`;
     }
 
-    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA') && !response.message.includes('Pago Total')) {
+    // Si NO está pagado (lógica de estados de pago)
+    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA') && !response.message.includes('Pago Total') && !response.message.includes('Pago total')) {
       html += `<div id="comprobante-manual-seccion" style="margin-top: 15px; border: 1px solid var(--color-principal); padding: 15px; border-radius: 5px;"><h3>Subir un comprobante (Cuota, Transferencia, etc.):</h3>`;
-      if (response.metodoPago === 'Pago en Cuotas' && response.proximaCuotaPendiente) {
-        html += `<div class="mensaje-cuota">Está por subir un comprobante para la <strong>${String(response.proximaCuotaPendiente).replace('C', 'Cuota ')}</strong>.</div>`;
+      
+      // --- (INICIO MODIFICACIÓN MENSAJE CUOTAS) ---
+      if (response.metodoPago === 'Pago en Cuotas') {
+         if (response.tieneHermanos) {
+            html += `<div class="mensaje-cuota">Recuerde que está pagando cuotas que incluyen Hermanos/as", el total abonado debe ser el importe equivalente a la cantidad de hijos/as que registró por cuota abonada.<br><strong>Seleccione la/s cuota/s que desea pagar:</strong></div>`;
+         } else {
+            const cantCuotas = response.cantidadCuotasRegistrada || 3;
+            const pendientes = response.cuotasPendientes;
+            html += `<div class="mensaje-cuota">Tiene ${pendientes} cuota${pendientes !== 1 ? 's' : ''} pendiente${pendientes !== 1 ? 's' : ''} de ${cantCuotas}.<br><strong>Seleccione la/s cuota/s que desea pagar:</strong></div>`;
+         }
       }
-      html += `<label for="tipo-comprobante-select">Seleccione el tipo de comprobante:</label><select id="tipo-comprobante-select"><option value="">-- Elija una opción --</option><option value="mp_total" style="display: ${pagoTotalMPVisible ? 'block' : 'none'};">a) Comprobante 1 pago Mercado Pago Monto Total</option><option value="mp_cuotas_group" style="display: ${response.metodoPago === 'Pago en Cuotas' ? 'block' : 'none'};">b) Comprobante Pagos 3 cuotas</option><option value="externo" style="display: ${response.metodoPago !== 'Pago en Cuotas' ? 'block' : 'none'};">c) Comprobante Externo (Transferencia, etc.)</option></select><div id="cuota-selector-container" style="display: none; margin-top: 10px;"><label>Seleccione la/s cuota/s que pagó con este comprobante:</label><div class="cuota-checkbox-container"><div class="cuota-checkbox-item"><input type="checkbox" id="cuota-check-1" value="mp_cuota_1"><label for="cuota-check-1">b.1) Comprobante Cuota 1</label></div><div class="cuota-checkbox-item"><input type="checkbox" id="cuota-check-2" value="mp_cuota_2"><label for="cuota-check-2">b.2) Comprobante Cuota 2</label></div><div class="cuota-checkbox-item"><input type="checkbox" id="cuota-check-3" value="mp_cuota_3"><label for="cuota-check-3">b.3) Comprobante Cuota 3</label></div></div></div><div id="datos-externo-container"><label for="externo-nombre-pagador">Nombre y Apellido (del Adulto Pagador):</label><input type="text" id="externo-nombre-pagador" placeholder="Nombre Apellido (Quien paga)"><label for="externo-dni-pagador">DNI (del Adulto Pagador):</label><input type="tel" id="externo-dni-pagador" placeholder="DNI (Quien paga)" pattern="[0-9]{8}" inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos."><div id="pago-familiar-container" style="display: none;"><input type="checkbox" id="es-pago-familiar-check"><label for="es-pago-familiar-check">Tilde la opción si el comprobante elegido incluye a los/as (hermanos/as)?</label></div></div><div id="upload-file-container"><label for="comprobante-manual-upload" class="file-input-label" style="background-color: #7f8c8d;">Seleccionar Archivo para Subir</label><input type="file" id="comprobante-manual-upload" accept="image/jpeg, image/png, application/pdf"><div style="display: flex; align-items: center; margin-bottom: 15px;"><span id="comprobante-manual-name" class="file-name" style="margin-bottom: 0;">Ningún archivo seleccionado</span><button type="button" id="btn-clear-comprobante" class="btn-remover" style="display:none; margin-top: 0; margin-left: 10px;">X</button></div><button type="button" id="btn-submit-comprobante-manual">Subir Comprobante</button><div class="loader" id="loader-comprobante" style="display: none; margin-top: 15px;"><div class="spinner"></div><p>Subiendo comprobante...</p></div></div><hr style="margin-top:20px;"><button type="button" id="btn-finalizar-upload" class="btn-final-volver">Finalizar Carga (Volver)</button></div>`;
-    } else {
+      // --- (FIN MODIFICACIÓN MENSAJE CUOTAS) ---
+
+      // (Selector de tipo de pago)
+      html += `<label for="tipo-comprobante-select">Seleccione el tipo de comprobante:</label><select id="tipo-comprobante-select"><option value="">-- Elija una opción --</option><option value="mp_total" style="display: ${pagoTotalMPVisible ? 'block' : 'none'};">a) Comprobante 1 pago Mercado Pago Monto Total</option><option value="mp_cuotas_group" style="display: ${response.metodoPago === 'Pago en Cuotas' ? 'block' : 'none'};">b) Comprobante Pagos 3 cuotas</option><option value="externo" style="display: ${response.metodoPago !== 'Pago en Cuotas' ? 'block' : 'none'};">c) Comprobante Externo (Transferencia, etc.)</option></select>`;
+      
+      // --- (INICIO MODIFICACIÓN CHECKBOXES - DESHABILITAR PAGADAS) ---
+      const cuotasPagadas = response.cuotasPagadas || [];
+      const c1_pagada = cuotasPagadas.includes('mp_cuota_1');
+      const c2_pagada = cuotasPagadas.includes('mp_cuota_2');
+      const c3_pagada = cuotasPagadas.includes('mp_cuota_3');
+
+      html += `<div id="cuota-selector-container" style="display: none; margin-top: 10px;">
+        <label>Seleccione la/s cuota/s que pagó con este comprobante:</label>
+        <div class="cuota-checkbox-container">
+          <div class="cuota-checkbox-item">
+            <input type="checkbox" id="cuota-check-1" value="mp_cuota_1" ${c1_pagada ? 'disabled' : ''}>
+            <label for="cuota-check-1" class="${c1_pagada ? 'disabled' : ''}">b.1) Comprobante Cuota 1 ${c1_pagada ? '<strong>(Ya Pagada)</strong>' : ''}</label>
+          </div>
+          <div class="cuota-checkbox-item">
+            <input type="checkbox" id="cuota-check-2" value="mp_cuota_2" ${c2_pagada ? 'disabled' : ''}>
+            <label for="cuota-check-2" class="${c2_pagada ? 'disabled' : ''}">b.2) Comprobante Cuota 2 ${c2_pagada ? '<strong>(Ya Pagada)</strong>' : ''}</label>
+          </div>
+          <div class="cuota-checkbox-item">
+            <input type="checkbox" id="cuota-check-3" value="mp_cuota_3" ${c3_pagada ? 'disabled' : ''}>
+            <label for="cuota-check-3" class="${c3_pagada ? 'disabled' : ''}">b.3) Comprobante Cuota 3 ${c3_pagada ? '<strong>(Ya Pagada)</strong>' : ''}</label>
+          </div>
+        </div>
+      </div>`;
+      // --- (FIN MODIFICACIÓN CHECKBOXES) ---
+      
+      // (Datos Pagador y Checkbox Familiar)
+      html += `<div id="datos-externo-container"><label for="externo-nombre-pagador">Nombre y Apellido (del Adulto Pagador):</label><input type="text" id="externo-nombre-pagador" placeholder="Nombre Apellido (Quien paga)"><label for="externo-dni-pagador">DNI (del Adulto Pagador):</label><input type="tel" id="externo-dni-pagador" placeholder="DNI (Quien paga)" pattern="[0-9]{8}" inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos.">
+      
+      <div id="pago-familiar-container" style="display: ${response.tieneHermanos ? 'flex' : 'none'};">
+        <input type="checkbox" id="es-pago-familiar-check">
+        <label for="es-pago-familiar-check">Tilde la opción si el comprobante elegido incluye a los/as (hermanos/as)?</label>
+      </div>
+      
+      </div>`;
+      
+      // (Botón de Subida)
+      html += `<div id="upload-file-container"><label for="comprobante-manual-upload" class="file-input-label" style="background-color: #7f8c8d;">Seleccionar Archivo para Subir</label><input type="file" id="comprobante-manual-upload" accept="image/jpeg, image/png, application/pdf"><div style="display: flex; align-items: center; margin-bottom: 15px;"><span id="comprobante-manual-name" class="file-name" style="margin-bottom: 0;">Ningún archivo seleccionado</span><button type="button" id="btn-clear-comprobante" class="btn-remover" style="display:none; margin-top: 0; margin-left: 10px;">X</button></div><button type="button" id="btn-submit-comprobante-manual">Subir Comprobante</button><div class="loader" id="loader-comprobante" style="display: none; margin-top: 15px;"><div class="spinner"></div><p>Subiendo comprobante...</p></div></div><hr style="margin-top:20px;"><button type="button" id="btn-finalizar-upload" class="btn-final-volver">Finalizar Carga (Volver)</button></div>`;
+    
+    } else { // Si está pagado Y no adeuda aptitud
       if (response.adeudaAptitud !== true) {
         html += `<button type="button" id="btn-finalizar-upload" class="btn-final-volver">Volver al Inicio</button>`;
       }
     }
 
+    // (Sección Editar)
     html += `<div id="editar-info-seccion" style="margin-top: 20px;"><button type="button" id="btn-mostrar-editar" class="btn-editar">Editar Datos de Contacto / Autorizados</button><div id="editar-form-container" style="display: none; border: 2px dashed #007bff; padding: 15px; margin-top: 10px; background: #f8f9fa;"><h3>Editando Datos</h3><p>Modifique solo los campos necesarios. Los campos de DNI e Email del inscripto no se pueden cambiar.</p><label for="edit-dni">DNI Inscripto (Bloqueado)</label><input type="text" id="edit-dni" readonly class="campo-bloqueado"><label for="edit-email">Email (Bloqueado)</label><input type="email" id="edit-email" readonly class="campo-bloqueado"><label for="edit-adultoResponsable1">Adulto Responsable 1</label><input type="text" id="edit-adultoResponsable1" class="form-cache"><label for="edit-dniResponsable1">DNI Responsable 1</label><input type="tel" id="edit-dniResponsable1" class="form-cache" maxlength="8" pattern="[0-9]{8}"><label for="edit-telResp1">Tel. Responsable 1 (Ej: (261) 5123456)</label><input type="tel" id="edit-telResp1" class="form-cache"><label for="edit-adultoResponsable2">Adulto Responsable 2 (Opcional)</label><input type="text" id="edit-adultoResponsable2" class="form-cache"><label for="edit-telResp2">Tel. Responsable 2 (Opcional)</label><input type="tel" id="edit-telResp2" class="form-cache"><label>Personas Autorizadas (Edite la lista completa)</label><div id="edit-autorizados-container"></div><button type="button" id="btn-edit-add-autorizado" class="btn-dinamico" style="width: auto;">+ Agregar Autorizado</button><label for="edit-aptitud-upload" style="margin-top: 15px;">Reemplazar Certificado de Aptitud (Opcional)</label><p style="font-size: 0.9em; margin-bottom: 10px;">(Solo seleccione un archivo si desea reemplazar el existente o subir uno nuevo).</p><input type="file" id="edit-aptitud-upload" accept="image/jpeg, image/png, application/pdf"><label for="edit-aptitud-upload" class="file-input-label">Seleccionar Nuevo Certificado</label><span id="edit-aptitud-name" class="file-name">Ningún archivo seleccionado</span><div class="loader-archivo" id="loader-edit-aptitud"></div><input type="hidden" id="edit-urlCertificadoAptitud"><div style="display: flex; gap: 10px; margin-top: 20px;"><button type="button" id="btn-guardar-cambios" class="btn-guardar" style="width: 50%;">Guardar Cambios</button><button type="button" id="btn-cancelar-edicion" class="btn-cancelar" style="width: 50%;">Cancelar</button></div></div></div>`;
 
     statusDiv.innerHTML = html;
 
+    // (Listeners)
     if (response.adeudaAptitud === true) {
       document.getElementById('aptitud-manual-upload').addEventListener('change', function() { document.getElementById('aptitud-manual-name').textContent = this.files[0] ? this.files[0].name : 'Ningún archivo seleccionado'; });
       document.getElementById('btn-submit-aptitud-manual').addEventListener('click', submitAptitudManual);
     }
 
-    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA') && !response.message.includes('Pago Total')) {
+    if (!response.message.includes('PAGADO') && !response.message.includes('PAGADA') && !response.message.includes('Pago Total') && !response.message.includes('Pago total')) {
       const cuotaSelectorContainer = document.getElementById('cuota-selector-container');
       const datosExternoContainer = document.getElementById('datos-externo-container');
       const uploadFileContainer = document.getElementById('upload-file-container');
@@ -191,16 +274,21 @@ function handleValidationSuccess(response) {
           uploadFileContainer.style.display = tipo ? 'block' : 'none';
           cuotaSelectorContainer.style.display = tipo === 'mp_cuotas_group' ? 'block' : 'none';
 
+          // --- (INICIO CORRECCIÓN PAGO FAMILIAR) ---
+          // La casilla familiar ahora se muestra si tiene hermanos (siempre visible en esta sección)
+          // Se oculta/muestra junto con `datosExternoContainer`
           if (pagoFamiliarContainer) {
-            const esPagoTotal = (tipo === 'mp_total' || tipo === 'externo');
-            const showFamiliarCheck = response.tieneHermanos && esPagoTotal;
-            pagoFamiliarContainer.style.display = showFamiliarCheck ? 'flex' : 'none';
+            pagoFamiliarContainer.style.display = response.tieneHermanos ? 'flex' : 'none';
           }
+          // --- (FIN CORRECCIÓN PAGO FAMILIAR) ---
+
           if (fileInputComprobante) fileInputComprobante.value = '';
           if (document.getElementById('comprobante-manual-name')) document.getElementById('comprobante-manual-name').textContent = 'Ningún archivo seleccionado';
           if (btnClearComprobante) btnClearComprobante.style.display = 'none';
         });
       }
+
+      // (Quitamos el listener del sub-selector de cuotas, ya no es necesario)
 
       if (fileInputComprobante) {
         fileInputComprobante.addEventListener('change', function() {
@@ -233,7 +321,7 @@ function handleValidationSuccess(response) {
               cuotasSeleccionadas.push(chk.value);
             });
             if (cuotasSeleccionadas.length === 0) {
-              loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0;">Por favor, seleccione al menos una cuota que corresponda al comprobante.</div>`;
+              loaderComprobante.innerHTML = `<div class="mensaje error" style="margin-bottom:0;">Por favor, seleccione al menos una cuota (no pagada) que corresponda al comprobante.</div>`;
               loaderComprobante.style.display = 'block';
               return;
             }
@@ -389,7 +477,7 @@ function manejarSubidaAptitudEdicion() {
       if (response.status === 'OK') {
         loader.className = 'loader-archivo exito';
         loader.textContent =   '✅ Nuevo certificado subido. Pulse "Guardar Cambios".'  ;
-        urlHidden.value = response.url; 
+        urlHidden.value = response.url; // <-- Guarda la URL simple
       } else {
         loader.className = 'loader-archivo error';
         loader.textContent =   `❌ Error:   ${response.message}`;
@@ -555,9 +643,23 @@ function handleComprobanteUploadFailure(error) {
   if (btnFinalizar) btnFinalizar.disabled = false;
 }
 
+/**
+ * (MODIFICADO)
+ * - Corrige el bug que borraba la sección de aptitud.
+ * - Resetea los checkboxes de cuotas al subir exitosamente.
+ * - (BUG 1 y 2) FUERZA UNA RE-VALIDACIÓN para ocultar el contenedor si el pago fue completado.
+ */
 function handleComprobanteUploadSuccess(response) {
-  document.getElementById('loader-comprobante').style.display = 'none';
+  // Limpiar mensajes de error/éxito anteriores de esta sección
   const statusDiv = document.getElementById('status-validacion');
+  statusDiv.querySelectorAll('.mensaje').forEach(el => {
+      // No borrar el mensaje de 'adeuda aptitud'
+      if (!el.closest('#aptitud-manual-seccion')) {
+          el.remove();
+      }
+  });
+
+  document.getElementById('loader-comprobante').style.display = 'none';
   
   const fileInputComprobante = document.getElementById('comprobante-manual-upload');
   const btnSubmitComprobante = document.getElementById('btn-submit-comprobante-manual');
@@ -565,17 +667,24 @@ function handleComprobanteUploadSuccess(response) {
   
   if (response.status === 'OK') {
     let finalMessage = response.message;
+    let isPaymentComplete = response.estadoPago && (response.estadoPago.includes('Pagado') || response.estadoPago.includes('Pago total') || response.estadoPago.includes('Pago Total'));
 
-    if (response.estadoPago && (response.estadoPago.includes('Pagado') || response.estadoPago.includes('Pago total') || response.estadoPago.includes('Pago Total'))) {
+    if (isPaymentComplete) {
       finalMessage = response.message; 
+      
+      // Ocultar el formulario de subida
       if(document.getElementById('comprobante-manual-seccion')) {
           document.getElementById('comprobante-manual-seccion').style.display = 'none';
       }
-      statusDiv.innerHTML = `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>` + statusDiv.innerHTML;
+      
+      statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>`);
+
     } else {
+      // Si es un pago de cuota parcial
       finalMessage += "<br>Puede subir otra cuota o finalizar.";
       statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje exito" style="margin-bottom:10px;">${finalMessage}</div>`);
 
+      // Limpiar todo para la próxima subida
       const tipoComprobanteSelect = document.getElementById('tipo-comprobante-select');
       const cuotaSelectorContainer = document.getElementById('cuota-selector-container');
       const datosExternoContainer = document.getElementById('datos-externo-container');
@@ -589,19 +698,45 @@ function handleComprobanteUploadSuccess(response) {
       if (cuotaSelectorContainer) cuotaSelectorContainer.style.display = 'none';
       if (datosExternoContainer) datosExternoContainer.style.display = 'none';
       if (uploadFileContainer) uploadFileContainer.style.display = 'none';
-      if (pagoFamiliarContainer) pagoFamiliarContainer.style.display = 'none';
+      if (pagoFamiliarContainer) pagoFamiliarContainer.style.display = 'none'; 
       if (btnClearComprobante) btnClearComprobante.style.display = 'none';
       if (document.getElementById('externo-nombre-pagador')) document.getElementById('externo-nombre-pagador').value = '';
       if (document.getElementById('externo-dni-pagador')) document.getElementById('externo-dni-pagador').value = '';
+      
+      // (NUEVO) Resetear checkboxes de cuotas
       document.querySelectorAll('.cuota-checkbox-item input:checked').forEach(chk => chk.checked = false);
     }
     
+    // Reactivar botones en cualquier caso de éxito
     if(btnSubmitComprobante) btnSubmitComprobante.disabled = false;
     if(fileInputComprobante) fileInputComprobante.disabled = false;
     if(btnFinalizar) btnFinalizar.disabled = false;
     
+    // --- (INICIO CORRECCIÓN BUG 1 y 2) ---
+    // Forzar una re-validación silenciosa para actualizar el estado (ocultar el div de pago si se completó)
+    const dni = document.getElementById('dni-input').value;
+    const tipo = document.getElementById('tipoInscripto').value;
+    // Mostrar un loader temporal mientras se re-valida
+    document.getElementById('loader-validacion').style.display = 'block';
+    document.getElementById('loader-validacion').querySelector('p').textContent = 'Actualizando estado...';
+    
+    // Limpiar mensajes antiguos antes de re-validar
+    statusDiv.querySelectorAll('.mensaje').forEach(el => {
+      // No borrar el mensaje de 'adeuda aptitud'
+      if (!el.closest('#aptitud-manual-seccion')) {
+          el.remove();
+      }
+    });
+
+    google.script.run
+      .withSuccessHandler(handleValidationSuccess) // Llama al handler principal de nuevo
+      .withFailureHandler(handleValidationFailure)
+      .validarAcceso(dni, tipo);
+    // --- (FIN CORRECCIÓN BUG 1 y 2) ---
+
     return; 
-  } else {
+
+  } else { // Si response.status es 'ERROR'
     statusDiv.insertAdjacentHTML('afterbegin', `<div class="mensaje error" style="margin-bottom:10px;">${response.message}</div>`);
     if(btnSubmitComprobante) btnSubmitComprobante.disabled = false;
     if(fileInputComprobante) fileInputComprobante.disabled = false;
@@ -609,6 +744,13 @@ function handleComprobanteUploadSuccess(response) {
   }
 }
 
+// =========================================================
+// --- LÓGICA DE INICIO Y ORQUESTACIÓN ---
+// =========================================================
+
+/**
+ * Inicia el temporizador para mostrar el formulario.
+ */
 function iniciarTemporizador(response) {
   document.getElementById('timer-seccion').style.display = 'block';
   document.getElementById('btn-validar').disabled = true;
@@ -625,6 +767,9 @@ function iniciarTemporizador(response) {
   }, 800);
 }
 
+/**
+ * Muestra el formulario principal y lo puebla con datos.
+ */
 function mostrarFormulario(response) {
   document.getElementById('validacion-seccion').style.display = 'none';
   document.getElementById('registro-seccion').style.display = 'block';
