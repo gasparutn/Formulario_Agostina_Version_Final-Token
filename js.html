@@ -191,11 +191,11 @@ function handleValidationSuccess(response) {
       // --- (INICIO MODIFICACIÓN MENSAJE CUOTAS) ---
       if (response.metodoPago === 'Pago en Cuotas') {
          if (response.tieneHermanos) {
-            html += `<div class="mensaje-cuota">Recuerde que está pagando cuotas que incluyen Hermanos/as", el total abonado debe ser el importe equivalente a la cantidad de hijos/as que registró por cuota abonada.<br><strong>Seleccione la/s cuota/s que desea pagar:</strong></div>`;
+            html += `<div class="mensaje-cuota">Recuerde que si está tildado la opción (comprobante elegido que incluye Hermanos/as), usted está informando que esta cargando un comprobante de pago por el total de cada Cuota que incluye al total de los hijo/as registrados.<br><strong></div>`;
          } else {
             const cantCuotas = response.cantidadCuotasRegistrada || 3;
             const pendientes = response.cuotasPendientes;
-            html += `<div class="mensaje-cuota">Tiene ${pendientes} cuota${pendientes !== 1 ? 's' : ''} pendiente${pendientes !== 1 ? 's' : ''} de ${cantCuotas}.<br><strong>Seleccione la/s cuota/s que desea pagar:</strong></div>`;
+            
          }
       }
       // --- (FIN MODIFICACIÓN MENSAJE CUOTAS) ---

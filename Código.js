@@ -167,12 +167,13 @@ function registrarDatos(datos) {
 // =========================================================
 
 /**
-* (MODIFICADO)
+* (MODIFICADO - Incluye corrección de bug, lógica de acumulación de pagador y lógica de columnas)
 * - Acepta un array `cuotasSeleccionadas`.
-* - Determina los NUEVOS ESTADOS DE PAGO ("Pago Total Familiar", "Pago total en cuotas", "Pago Cuota 1 y 2").
+* - (NUEVO) Determina el estado de pago (AI) basado en el estado completo (Ej: "C1 Pagada, C2 Pendiente...").
 * - Construye el NUEVO NOMBRE DE ARCHIVO basado en las reglas.
-* - Escribe el comprobante en las columnas de cuotas correctas (AR, AS, AT).
-* - Aplica el pago a toda la familia si `esPagoFamiliar` es true (¡incluyendo cuotas parciales!).
+* - Escribe el comprobante en la columna correcta (AQ, AR, AS, AT) según las reglas del usuario.
+* - Acumula los datos del pagador (Nombre/DNI) con prefijo (C1, C2, TOTAL) en lugar de sobrescribirlos.
+* - (CORREGIDO) Valida la respuesta de `uploadFileToDrive` esperando `=HYPERLINK`.
 */
 function subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras, esPagoFamiliar = false) {
   const lock = LockService.getScriptLock();
@@ -208,59 +209,77 @@ function subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras,
       const cantidadCuotasRegistrada = parseInt(rangoFila[COL_CANTIDAD_CUOTAS - 1]) || 3;
       
       const tipoComprobantePrincipal = cuotasSeleccionadas[0]; // Usamos el primero para la lógica principal
+      // *Sección 2 (esPagoTotalCompleto) se mueve ABAJO*
       let esPagoTotalCompleto = ['mp_total', 'externo'].includes(tipoComprobantePrincipal);
       let nuevoEstadoPago = "";
       const mensajeFinalCompleto = `¡Inscripción completa!!!<br>Estimada familia, puede validar nuevamente con el dni y acceder a modificar datos de inscrpición en caso de que lo requiera.`;
 
-      // --- 2. Determinar si es un pago total de cuotas ---
+      // --- (INICIO NUEVA LÓGICA DE ESTADO DE PAGO - SECCIÓN 2 y 3) ---
       const cuotasPagadasAhora = new Set(cuotasSeleccionadas);
-      let cuotasPagadasNombres = []; // Para el estado de pago, ej ["Cuota 1", "Cuota 2"]
-      let pagadasCount = 0;
+      let cuotasPagadasNombres = []; // Para el mensaje final, ej ["Cuota 2"]
       
+      const [c1, c2, c3] = [rangoFila[COL_CUOTA_1 - 1], rangoFila[COL_CUOTA_2 - 1], rangoFila[COL_CUOTA_3 - 1]];
+
+      // Definir el estado actual y futuro de cada cuota
+      const estadoC1 = (String(c1).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_1'));
+      const estadoC2 = (String(c2).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_2'));
+      const estadoC3 = (String(c3).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_3'));
+      
+      let pagadasCount = 0;
+      if (estadoC1) pagadasCount++;
+      if (estadoC2) pagadasCount++;
+      if (estadoC3) pagadasCount++;
+      
+      // Actualizar el valor de esPagoTotalCompleto
       if (metodoPagoHoja === 'Pago en Cuotas') {
-        const [c1, c2, c3] = [rangoFila[COL_CUOTA_1 - 1], rangoFila[COL_CUOTA_2 - 1], rangoFila[COL_CUOTA_3 - 1]];
-        
-        if (String(c1).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_1')) {
-          pagadasCount++;
-          if (!cuotasPagadasNombres.includes("Cuota 1")) cuotasPagadasNombres.push("Cuota 1");
-        }
-        if (String(c2).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_2')) {
-          pagadasCount++;
-          if (!cuotasPagadasNombres.includes("Cuota 2")) cuotasPagadasNombres.push("Cuota 2");
-        }
-        if (String(c3).startsWith("Pagada") || cuotasPagadasAhora.has('mp_cuota_3')) {
-          pagadasCount++;
-          if (!cuotasPagadasNombres.includes("Cuota 3")) cuotasPagadasNombres.push("Cuota 3");
-        }
-        
         if (pagadasCount >= cantidadCuotasRegistrada) {
-          esPagoTotalCompleto = true; // Ahora se considera pago total
+          esPagoTotalCompleto = true; 
+        } else {
+          esPagoTotalCompleto = false; // Asegurarse de que sea falso si no se cumple (corrige bug C2)
         }
       }
+      // (Si no es 'Pago en Cuotas', esPagoTotalCompleto mantiene su valor inicial de 'externo'/'mp_total')
 
-      // --- 3. Determinar el NUEVO ESTADO DE PAGO (Reglas del Usuario) ---
+      // Generar el nombre de las cuotas que se pagan AHORA (para el mensaje de éxito)
+      if (cuotasPagadasAhora.has('mp_cuota_1')) cuotasPagadasNombres.push("Cuota 1");
+      if (cuotasPagadasAhora.has('mp_cuota_2')) cuotasPagadasNombres.push("Cuota 2");
+      if (cuotasPagadasAhora.has('mp_cuota_3')) cuotasPagadasNombres.push("Cuota 3");
+
+      // Determinar el NUEVO ESTADO DE PAGO (Columna AI)
       if (esPagoTotalCompleto) {
         if (metodoPagoHoja === 'Pago en Cuotas') {
-          nuevoEstadoPago = "Pago total en cuotas"; // Regla Pago Cuotas
+          nuevoEstadoPago = "Pago total en cuotas";
         } else if (esPagoFamiliar && (metodoPagoHoja === 'Transferencia' || metodoPagoHoja === 'Pago Efectivo (Adm del Club)')) {
-          nuevoEstadoPago = "Pago Total Familiar"; // Regla Familiar Transfer/Efectivo
+          nuevoEstadoPago = "Pago Total Familiar";
         } else {
-          // Individual Transfer/Efectivo
-          nuevoEstadoPago = "Pagado"; 
+          nuevoEstadoPago = "Pagado"; // Transferencia/Efectivo Individual
         }
       } else {
-        // Es un pago de cuota parcial
-        if (cuotasPagadasNombres.length > 0) {
-          nuevoEstadoPago = `Pago ${cuotasPagadasNombres.join(' y ')}`; // Ej: "Pago Cuota 1 y 2"
+        // Lógica de estado parcial (C1 Pagada, C2 Pendiente, etc.)
+        if (metodoPagoHoja === 'Pago en Cuotas') {
+          let estados = [];
+          if (estadoC1) estados.push("C1 Pagada"); else estados.push("C1 Pendiente");
+          if (estadoC2) estados.push("C2 Pagada"); else estados.push("C2 Pendiente");
+          if (estadoC3) estados.push("C3 Pagada"); else estados.push("C3 Pendiente");
+          
+          // Filtrar según la cantidad de cuotas registradas
+          if (cantidadCuotasRegistrada === 2) estados = [estados[0], estados[1]];
+          if (cantidadCuotasRegistrada === 1) estados = [estados[0]];
+          
+          nuevoEstadoPago = estados.join(', '); // Ej: "C1 Pagada, C2 Pagada, C3 Pendiente"
         } else {
-          nuevoEstadoPago = "Cuotas (En revisión)"; // Fallback
+          // Si es Transferencia/Efectivo pero no es total (caso raro), se queda en revisión
+          nuevoEstadoPago = "Pago Parcial (En revisión)"; 
         }
       }
+      // --- (FIN NUEVA LÓGICA DE ESTADO DE PAGO) ---
+
 
       // --- 4. Construir el Nombre del Archivo (Reglas del Usuario) ---
       let baseNombreArchivo = "";
       const metodoPagoSimple = metodoPagoHoja.replace(/[\s()]/g, '');
-      const estadoPagoSimple = nuevoEstadoPago.replace(/[\s()]/g, '_'); // Reemplaza espacios con guion bajo
+      // Usar el estado de pago (AI) para el nombre del archivo
+      const estadoPagoSimple = nuevoEstadoPago.replace(/[\s(),]/g, '_'); // Reemplaza espacios, comas y paréntesis
       
       if (esPagoFamiliar) {
         // Regla Familiar (Transfer/Efectivo Y Cuotas): "dni_apellido_Metodo_Estado"
@@ -285,56 +304,135 @@ function subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras,
 
       // --- 5. Subir el Archivo ---
       const fileUrl = uploadFileToDrive(fileData.data, fileData.mimeType, nuevoNombreArchivo, dniLimpio, 'comprobante');
-      if (typeof fileUrl !== 'string' || !fileUrl.startsWith('http')) {
+
+      // --- (CORRECCIÓN BUG DE CARGA) ---
+      if (typeof fileUrl !== 'string' || !fileUrl.startsWith('=HYPERLINK')) {
         throw new Error("Error al subir el archivo a Drive: " + (fileUrl.message || 'Error desconocido'));
       }
+      // --- (FIN CORRECCIÓN BUG DE CARGA) ---
+
 
       // --- 6. Aplicar Cambios a la Hoja ---
       const nombrePagador = datosExtras.nombrePagador;
       const dniPagador = datosExtras.dniPagador;
       let mensajeExito = "";
       
-      // (Función Helper para aplicar cambios)
-      const aplicarCambios = (filaAfectada, esTotal) => {
-        hoja.getRange(filaAfectada, COL_PAGADOR_NOMBRE_MANUAL).setValue(nombrePagador);
-        hoja.getRange(filaAfectada, COL_PAGADOR_DNI_MANUAL).setValue(dniPagador);
-        hoja.getRange(filaAfectada, COL_ESTADO_PAGO).setValue(nuevoEstadoPago);
+      // --- (INICIO MODIFICACIÓN - ACUMULACIÓN PAGADOR + LÓGICA DE COLUMNAS v3) ---
+      /**
+       * (Función Helper para aplicar cambios)
+       * @param {number} filaAfectada - El número de fila a modificar.
+       * @param {boolean} esTotal - Si este pago completa el total de cuotas (calculado arriba).
+       * @param {string} metodoPago - El método de pago (ej: "Pago en Cuotas").
+       */
+      const aplicarCambios = (filaAfectada, esTotal, metodoPago) => {
         
+        // 1. Crear el prefijo y el string para los nuevos datos del pagador
+        let prefijoCuota = "";
+        
+        // Determinar el prefijo (C1, C2, C3, o TOTAL)
+        // (esTotal viene de la lógica revisada de arriba)
         if (esTotal) {
-            // Si es pago total, se pone en la columna TOTAL (AQ) y se marcan las cuotas como Pagadas
-            hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_TOTAL_EXT).setValue(fileUrl);
+          prefijoCuota = "TOTAL"; 
+        } else {
+          // Si es cuota parcial, unir los prefijos. Ej: C1-C2
+          // (la variable 'cuotasSeleccionadas' está disponible desde la función padre)
+          prefijoCuota = cuotasSeleccionadas.map(c => {
+            if (c === 'mp_cuota_1') return 'C1';
+            if (c === 'mp_cuota_2') return 'C2';
+            if (c === 'mp_cuota_3') return 'C3';
+            return 'Otro'; // Fallback
+          }).join('-');
+        }
+
+        // Formatear los nuevos datos con el prefijo
+        // (las variables 'nombrePagador' y 'dniPagador' están disponibles desde la función padre)
+        const datosNuevosNombre = `${prefijoCuota}_${nombrePagador}`;
+        const datosNuevosDNI = `${prefijoCuota}_${dniPagador}`;
+        
+        // 2. Obtener valores actuales de las celdas
+        const celdaNombre = hoja.getRange(filaAfectada, COL_PAGADOR_NOMBRE_MANUAL); // Columna AN
+        const celdaDNI = hoja.getRange(filaAfectada, COL_PAGADOR_DNI_MANUAL); // Columna AO
+        const valorActualNombre = celdaNombre.getValue().toString().trim();
+        const valorActualDNI = celdaDNI.getValue().toString().trim();
+
+        // 3. Acumular valores, separándolos con coma
+        const valorFinalNombre = valorActualNombre ? `${valorActualNombre}, ${datosNuevosNombre}` : datosNuevosNombre;
+        const valorFinalDNI = valorActualDNI ? `${valorActualDNI}, ${datosNuevosDNI}` : datosNuevosDNI;
+
+        // 4. Setear los nuevos valores acumulados (Esto SÓLO afecta AN y AO)
+        celdaNombre.setValue(valorFinalNombre);
+        celdaDNI.setValue(valorFinalDNI);
+        
+        // 5. Setear el estado de pago (AI)
+        // (nuevoEstadoPago se calcula arriba con la lógica "C1 Pagada, C2 Pendiente...")
+        hoja.getRange(filaAfectada, COL_ESTADO_PAGO).setValue(nuevoEstadoPago); 
+
+        // --- (INICIO LÓGICA DE COLUMNAS REVISADA v3) ---
+        // Aquí es donde se asigna el LINK del comprobante (fileUrl)
+
+        // Regla: Transferencia o Efectivo (Siempre va a AQ)
+        if (metodoPago === 'Transferencia' || metodoPago === 'Pago Efectivo (Adm del Club)') {
+            hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_TOTAL_EXT).setValue(fileUrl); // Columna AQ
+        } 
+        
+        // Regla: 'Pago en Cuotas'
+        else { 
+            // (cuotasPagadasAhora = Set de lo que el usuario HIZO CHECK AHORA, scope padre)
+            const pagandoC1 = cuotasPagadasAhora.has('mp_cuota_1');
+            const pagandoC2 = cuotasPagadasAhora.has('mp_cuota_2');
+            const pagandoC3 = cuotasPagadasAhora.has('mp_cuota_3');
+
+            // Lógica de asignación de columnas según reglas del usuario
+            // Regla 1 (C1 o C1+C2+C3): Si C1 está seleccionada, el link va a AR.
+            if (pagandoC1) {
+                hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA1).setValue(fileUrl); // AR
+            }
+            
+            // Regla 2 (C2 o C2+C3, sin C1): Si C2 está seleccionada (y C1 no), el link va a AS.
+            // (Se usa 'else if' para que C1+C2+C3 no entre aquí)
+            else if (pagandoC2) { 
+                hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA2).setValue(fileUrl); // AS
+            }
+            
+            // Regla 3 (C3 sola): Si C3 está seleccionada (y C1, C2 no), el link va a AT.
+            else if (pagandoC3) {
+                hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA3).setValue(fileUrl); // AT
+            }
+        }
+        
+        // --- Actualizar Estados de Pago (AE, AF, AG) ---
+        if (esTotal) { // Si este pago COMPLETA el total (ej: pagando C2+C3, C1 ya estaba paga)
             hoja.getRange(filaAfectada, COL_CUOTA_1, 1, 3).setValues([["Pagada", "Pagada", "Pagada"]]);
         } else {
-            // Si es pago de cuota parcial, se pone el link en la/s columna/s de cuota específica/s
+            // Solo marcar las cuotas pagadas AHORA
             cuotasPagadasAhora.forEach(cuota => {
                 if(cuota === 'mp_cuota_1') {
-                  hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA1).setValue(fileUrl); // AR
                   hoja.getRange(filaAfectada, COL_CUOTA_1).setValue("Pagada (En revisión)"); // AE
                 }
                 if(cuota === 'mp_cuota_2') {
-                  hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA2).setValue(fileUrl); // AS
                   hoja.getRange(filaAfectada, COL_CUOTA_2).setValue("Pagada (En revisión)"); // AF
                 }
                 if(cuota === 'mp_cuota_3') {
-                  hoja.getRange(filaAfectada, COL_COMPROBANTE_MANUAL_CUOTA3).setValue(fileUrl); // AT
                   hoja.getRange(filaAfectada, COL_CUOTA_3).setValue("Pagada (En revisión)"); // AG
                 }
             });
         }
-      };
+        // --- (FIN LÓGICA DE COLUMNAS REVISADA v3) ---
+      }; // Fin de la función aplicarCambios
+      // --- (FIN MODIFICACIÓN) ---
+
       
-      // --- (INICIO CORRECCIÓN BUG 3: Lógica Familiar para Cuotas Parciales) ---
       if (esPagoFamiliar) {
         const idFamiliar = rangoFila[COL_VINCULO_PRINCIPAL - 1]; // AV (48)
         if (!idFamiliar) {
            Logger.log(`Pago Familiar marcado, pero no se encontró ID Familiar en fila ${fila}. Aplicando solo al DNI ${dniLimpio}.`);
-           aplicarCambios(fila, esPagoTotalCompleto);
+           aplicarCambios(fila, esPagoTotalCompleto, metodoPagoHoja);
         } else {
           const rangoVinculos = hoja.getRange(2, COL_VINCULO_PRINCIPAL, hoja.getLastRow() - 1, 1);
           const todasLasFilas = rangoVinculos.createTextFinder(idFamiliar).matchEntireCell(true).findAll();
           let nombresActualizados = [];
           todasLasFilas.forEach(celda => {
-            aplicarCambios(celda.getRow(), esPagoTotalCompleto); // Aplica el mismo tipo de pago (total o parcial) a todos
+            aplicarCambios(celda.getRow(), esPagoTotalCompleto, metodoPagoHoja); // Aplica el mismo tipo de pago (total o parcial) a todos
             nombresActualizados.push(hoja.getRange(celda.getRow(), COL_NOMBRE).getValue());
           });
           Logger.log(`Pago Familiar aplicado a ${nombresActualizados.length} miembros: ${nombresActualizados.join(', ')}`);
@@ -342,27 +440,25 @@ function subirComprobanteManual(dni, fileData, cuotasSeleccionadas, datosExtras,
             mensajeExito = `¡Pago Familiar Total registrado con éxito para ${nombresActualizados.length} inscriptos!<br>${mensajeFinalCompleto}`;
           } else {
             // Mensaje para pago de cuotas parciales familiares
+            // (cuotasPagadasNombres se calcula arriba con la nueva lógica)
             mensajeExito = `Se registró el pago de ${cuotasPagadasNombres.join(' y ')} para ${nombresActualizados.length} inscriptos.`;
           }
         }
       } else {
         // Aplicación Individual
-        aplicarCambios(fila, esPagoTotalCompleto);
+        aplicarCambios(fila, esPagoTotalCompleto, metodoPagoHoja);
       }
-      // --- (FIN CORRECCIÓN BUG 3) ---
 
       // --- 7. Formular Mensaje de Éxito ---
       if (!mensajeExito) { // Si el mensaje no se seteó en el bloque familiar (porque fue individual)
          if (esPagoTotalCompleto) {
             mensajeExito = mensajeFinalCompleto;
          } else {
-            // Quedó en "Pago Cuota X y Y" o "En revisión"
-            // Volver a leer la fila para obtener los datos más actualizados de las cuotas
-            const cuotasActuales = hoja.getRange(fila, COL_CUOTA_1, 1, 3).getValues()[0];
-            const pagadasActuales = cuotasActuales.filter(c => String(c).startsWith("Pagada")).length;
-            const pendientes = cantidadCuotasRegistrada - pagadasActuales;
-            
+            // (cuotasPagadasNombres se calcula arriba con la nueva lógica)
             mensajeExito = `Se registró el pago de: ${cuotasPagadasNombres.join(' y ')}.`;
+            
+            // Recalcular pendientes (basado en la lógica nueva de pagadasCount)
+            const pendientes = cantidadCuotasRegistrada - pagadasCount;
             
             if (pendientes > 0) {
               mensajeExito += ` Le quedan ${pendientes} cuota${pendientes > 1 ? 's' : ''} pendiente${pendientes > 1 ? 's' : ''}.`;
@@ -546,7 +642,9 @@ function obtenerEstadoRegistro() {
     return { alcanzado: registrosActuales >= limiteCupos, jornadaExtendidaAlcanzada: registrosJornadaExtendida >= limiteJornadaExtendida, cierreManual: !formularioAbierto };
   } catch (e) {
     Logger.log("Error en obtenerEstadoRegistro: " + e.message);
+    // --- (INICIO CORRECCIÓN SYNTAX ERROR 'D') ---
     return { cierreManual: true, message: "Error al leer config: " + e.message };
+    // --- (FIN CORRECCIÓN SYNTAX ERROR 'D') ---
   }
 }
 
@@ -680,7 +778,7 @@ function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio,
   const tieneComprobantes = c_total || c_c1 || c_c2 || c_c3;
 
   // Lógica para resetear estado si los comprobantes fueron borrados
-  if (!tieneComprobantes && (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Total') || String(estadoPagoActual).includes('Pago Cuota'))) {
+  if (!tieneComprobantes && (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pagado') || String(estadoPagoActual).includes('Total') || String(estadoPagoActual).includes('Pago Cuota') || String(estadoPagoActual).includes('Pendiente'))) {
     Logger.log(`Corrección de estado para DNI ${dniLimpio}: El estado era '${estadoPagoActual}' pero no hay comprobantes. Reseteando.`);
     estadoPagoActual = metodoPago === 'Pago en Cuotas' ? `Pendiente (${cantidadCuotasRegistrada} Cuotas)` : "Pendiente (Transferencia)";
     hojaRegistro.getRange(filaRegistro, COL_ESTADO_PAGO).setValue(estadoPagoActual);
@@ -745,6 +843,11 @@ function gestionarUsuarioYaRegistrado(ss, hojaRegistro, filaRegistro, dniLimpio,
     return { ...baseResponse, message: `✅ El DNI ${dniLimpio} (${nombreCompleto}) ya se encuentra REGISTRADO y la inscripción está PAGADA (${estadoPagoActual}).`, proximaCuotaPendiente: null, cuotasPendientes: 0 };
   }
   
+  // (NUEVO) Mensaje para el estado "C1 Pagada, C2 Pendiente..."
+  if (String(estadoPagoActual).includes('Pendiente') && String(estadoPagoActual).includes('Pagada')) {
+     return { ...baseResponse, message: `⚠️ El DNI ${dniLimpio} (${nombreCompleto}) ya se encuentra REGISTRADO. Estado: ${estadoPagoActual}.`, proximaCuotaPendiente: proximaCuotaPendiente };
+  }
+
   if (String(estadoPagoActual).includes('En revisión') || String(estadoPagoActual).includes('Pago Cuota')) {
     let mensajeRevision = `⚠️ El DNI ${dniLimpio} (${nombreCompleto}) ya se encuentra REGISTRADO. Estado: ${estadoPagoActual}.`;
     if (cuotasPendientes > 0) mensajeRevision += ` Le quedan ${cuotasPendientes} cuota${cuotasPendientes > 1 ? 's' : ''} pendiente${cuotasPendientes > 1 ? 's' : ''}.`;
