@@ -25,7 +25,8 @@
           <option value="preventa">Soy Inscripto PRE-VENTA</option>
         </select>
         <label for="dni-input">Ingrese el DNI del inscripto (sin puntos)</label>
-        <input type="tel" id="dni-input" required pattern="[0-9]{8}" inputmode="numeric" maxlength="8" placeholder="Ej: 12345678" title="El DNI debe tener exactamente 8 dígitos numéricos.">
+        <input type="tel" id="dni-input" required pattern="[0-9]{8}" inputmode="numeric" maxlength="8"
+          placeholder="Ej: 12345678" title="El DNI debe tener exactamente 8 dígitos numéricos.">
         <button type="button" id="btn-validar">Verificar DNI</button>
       </div>
       <div class="loader" id="loader-validacion">
@@ -54,7 +55,8 @@
           <label for="dni">DNI: (sin puntos)</label>
           <input type="text" id="dni" name="dni" class="form-cache" required readonly inputmode="numeric">
           <label for="fechaNacimiento">Fecha de Nacimiento:</label>
-          <input type="date" id="fechaNacimiento" name="fechaNacimiento" class="form-cache" required min="2010-01-01" max="2023-12-31">
+          <input type="date" id="fechaNacimiento" name="fechaNacimiento" class="form-cache" required min="2010-01-01"
+            max="2023-12-31">
           <div id="edad-calculada"></div>
         </div>
 
@@ -74,21 +76,31 @@
           <input type="text" id="adultoResponsable1" name="adultoResponsable1" class="form-cache" required>
 
           <label for="dniResponsable1">DNI Responsable 1: (sin puntos)</label>
-          <input type="tel" id="dniResponsable1" name="dniResponsable1" class="form-cache" required pattern="[0-9]{8}" inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos.">
+          <input type="tel" id="dniResponsable1" name="dniResponsable1" class="form-cache" required pattern="[0-9]{8}"
+            inputmode="numeric" maxlength="8" title="El DNI debe tener exactamente 8 dígitos numéricos.">
 
           <label for="telAreaResp1">Teléfono Responsable 1:</label>
           <div class="grupo-telefono">
-            <input type="tel" id="telAreaResp1" name="telAreaResp1" class="telefono-area-code form-cache" placeholder="Cod. Área (sin 0)" required pattern="^[1-9][0-9]{1,4}$" title="Ingrese el Código de Área sin el 0 inicial.">
-            <input type="tel" id="telNumResp1" name="telNumResp1" class="telefono-numero form-cache" placeholder="Número (sin 15)" required pattern="^[0-9]{6,10}$" title="Ingrese el número de teléfono sin el 15 inicial.">
+            <input type="tel" id="telAreaResp1" name="telAreaResp1" class="telefono-area-code form-cache"
+              placeholder="Cod. Área (sin 0)" required pattern="^[1-9][0-9]{1,4}$"
+              title="Ingrese el Código de Área sin el 0 inicial.">
+            <input type="tel" id="telNumResp1" name="telNumResp1" class="telefono-numero form-cache"
+              placeholder="Número (sin 15)" required pattern="^[0-9]{6,10}$"
+              title="Ingrese el número de teléfono sin el 15 inicial.">
           </div>
 
           <label for="adultoResponsable2">Responsable 2:(Opcional)</label>
-          <input type="text" id="adultoResponsable2" name="adultoResponsable2" class="form-cache" placeholder="Nombre y Apellido">
+          <input type="text" id="adultoResponsable2" name="adultoResponsable2" class="form-cache"
+            placeholder="Nombre y Apellido">
 
           <label for="telAreaResp2">Teléfono Responsable 2: (Opcional)</label>
           <div class="grupo-telefono">
-            <input type="tel" id="telAreaResp2" name="telAreaResp2" class="telefono-area-code form-cache" placeholder="Cod. Área (sin 0)" pattern="^[1-9][0-9]{1,4}$" title="Ingrese el Código de Área sin el 0 inicial.">
-            <input type="tel" id="telNumResp2" name="telNumResp2" class="telefono-numero form-cache" placeholder="Número (sin 15)" pattern="^[0-9]{6,10}$" title="Ingrese el número de teléfono sin el 15 inicial.">
+            <input type="tel" id="telAreaResp2" name="telAreaResp2" class="telefono-area-code form-cache"
+              placeholder="Cod. Área (sin 0)" pattern="^[1-9][0-9]{1,4}$"
+              title="Ingrese el Código de Área sin el 0 inicial.">
+            <input type="tel" id="telNumResp2" name="telNumResp2" class="telefono-numero form-cache"
+              placeholder="Número (sin 15)" pattern="^[0-9]{6,10}$"
+              title="Ingrese el número de teléfono sin el 15 inicial.">
           </div>
 
           <label for="email">Email (Contacto Principal 1):</label>
@@ -103,14 +115,17 @@
 
         <div class="form-section" id="seccion-hermanos">
           <h3>(Opcional) Agregar Hermanos/as</h3>
-          
+
           <div id="hermano-modal-backdrop" style="display: none;">
             <div id="hermano-modal-content">
               <h4>Validar Hermano/a</h4>
               <p>Ingrese el DNI del hermano/a para verificar si ya existe en nuestros registros.</p>
               <label for="hermano-modal-dni">DNI del Hermano/a (8 dígitos)</label>
               <input type="tel" id="hermano-modal-dni" pattern="[0-9]{8}" maxlength="8" inputmode="numeric">
-              <div class="loader" id="loader-hermano-modal" style="display: none;"><div class="spinner"></div><p>Validando...</p></div>
+              <div class="loader" id="loader-hermano-modal" style="display: none;">
+                <div class="spinner"></div>
+                <p>Validando...</p>
+              </div>
               <div class="status" id="status-hermano-modal"></div>
               <div class="modal-botones">
                 <button type="button" id="btn-modal-validar-hermano" class="btn-guardar">Validar DNI</button>
@@ -132,21 +147,24 @@
             <label><input type="radio" name="practicaDeporte" value="Sí" class="form-cache" required> Sí</label>
             <label><input type="radio" name="practicaDeporte" value="No" class="form-cache"> No</label>
           </div>
-          <input type="text" id="especifiqueDeporte" name="especifiqueDeporte" class="form-cache" placeholder="Si la respuesta es sí, especifique cuál" style="display:none;">
+          <input type="text" id="especifiqueDeporte" name="especifiqueDeporte" class="form-cache"
+            placeholder="Si la respuesta es sí, especifique cuál" style="display:none;">
 
           <div class="radio-group">
             <label>¿Tiene alguna enfermedad preexistente o medicación especial?</label>
             <label><input type="radio" name="tieneEnfermedad" value="Sí" class="form-cache" required> Sí</label>
             <label><input type="radio" name="tieneEnfermedad" value="No" class="form-cache"> No</label>
           </div>
-          <input type="text" id="especifiqueEnfermedad" name="especifiqueEnfermedad" class="form-cache" placeholder="Si la respuesta es sí, especifique" style="display:none;">
+          <input type="text" id="especifiqueEnfermedad" name="especifiqueEnfermedad" class="form-cache"
+            placeholder="Si la respuesta es sí, especifique" style="display:none;">
 
           <div class="radio-group">
             <label>¿Es alérgico/a a algo?</label>
             <label><input type="radio" name="esAlergico" value="Sí" class="form-cache" required> Sí</label>
             <label><input type="radio" name="esAlergico" value="No" class="form-cache"> No</label>
           </div>
-          <input type="text" id="especifiqueAlergia" name="especifiqueAlergia" class="form-cache" placeholder="Si la respuesta es sí, especifique" style="display:none;">
+          <input type="text" id="especifiqueAlergia" name="especifiqueAlergia" class="form-cache"
+            placeholder="Si la respuesta es sí, especifique" style="display:none;">
         </div>
 
 
@@ -154,7 +172,8 @@
           <h3>Documentación y Pago</h3>
           <label for="certificadoAptitud">Certificado de Aptitud Física: (Opcional)</label>
           <label for="certificadoAptitud" class="file-input-label">Seleccionar Certificado</label>
-          <input type="file" id="certificadoAptitud" name="certificadoAptitud" accept="image/jpeg, image/png, application/pdf">
+          <input type="file" id="certificadoAptitud" name="certificadoAptitud"
+            accept="image/jpeg, image/png, application/pdf">
           <span id="certificadoAptitudName" class="file-name">Ningún archivo seleccionado</span>
           <div class="loader-archivo" id="loader-certificado"></div>
           <input type="hidden" id="urlCertificadoAptitud" name="urlCertificadoAptitud">
@@ -178,7 +197,9 @@
             </label>
           </div>
           <label for="jornada">Seleccione la Jornada:</label>
-          <span id="jornada-cupo-msg" style="display: none; color: #dc3545; font-weight: bold; font-size: 0.9em; margin-left: 10px;">(No hay cupo Jornada Extendida)</span>
+          <span id="jornada-cupo-msg"
+            style="display: none; color: #dc3545; font-weight: bold; font-size: 0.9em; margin-left: 10px;">(No hay cupo
+            Jornada Extendida)</span>
           <select id="jornada" name="jornada" class="form-cache" required>
             <option value="">-- Por favor, elija una opción --</option>
             <option value="Jornada Normal">Jornada Normal</option>
@@ -229,7 +250,7 @@
       <div class="status" id="status-registro"></div>
     </div>
   </div>
-  
+
 
 
   <script>
@@ -250,7 +271,7 @@
   </script>
 
   <?!= HtmlService.createHtmlOutputFromFile('js').getContent(); ?>
-   <?!= HtmlService.createHtmlOutputFromFile('js2').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('js2').getContent(); ?>
   <?!= HtmlService.createHtmlOutputFromFile('Eventos').getContent(); ?>
 </body>
 

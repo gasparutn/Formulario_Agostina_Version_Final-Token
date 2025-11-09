@@ -1,13 +1,12 @@
-const SPREADSHEET_ID = '1Tw60UpJ8BQtq_cO7HGVWZ851ST5LP77d9IiSty1wGVo';
+const SPREADSHEET_ID = '1Ru-XGng2hYJbUvl-H2IA7aYQx7Ju-jk1LT1fkYOnG0w';
 /* */
 const NOMBRE_HOJA_BUSQUEDA = 'Base de Datos';
 const NOMBRE_HOJA_REGISTRO = 'Registros';
 const NOMBRE_HOJA_CONFIG = 'Config';
 
-/* */
-const FOLDER_ID_FOTOS = '1_WFmPYKgbo0Z3aVwsvGR24PV8VOnFsai';
-const FOLDER_ID_FICHAS = '17if0YWJkLQaH0ClEGahw-Y3MzFdXDm3E';
-const FOLDER_ID_COMPROBANTES = '1owPLts7uwZyYrsc8hbbf8slYNU8DdV2D';
+const FOLDER_ID_FOTOS = '1S2SbkuYdvcLFZYoHacfgwEU80kAN094l';
+const FOLDER_ID_FICHAS = '1aDsTTDWHiDFUeZ8ByGp8_LY3fdzVQomu';
+const FOLDER_ID_COMPROBANTES = '169EISq4RsDetQ0H3B17ViZFfe25xPcMM';
 
 // =========================================================
 // (Punto 1) CONSTANTES "Base de Datos" ACTUALIZADAS
