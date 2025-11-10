@@ -90,7 +90,7 @@
     } else {
       localStorage.removeItem('pendingSiblings');
     }
-    
+
     // --- INICIO DE LA CORRECCIÓN ---
     // 1. Definir el HTML del botón que faltaba
     const botonVolverHTML = `
@@ -314,6 +314,10 @@
       html += `<div id="editar-info-seccion" style="margin-top: 20px;"><button type="button" id="btn-mostrar-editar" class="btn-editar">Editar Datos de Contacto / Autorizados</button><div id="editar-form-container" style="display: none; border: 2px dashed #007bff; padding: 15px; margin-top: 10px; background: #f8f9fa;"><h3>Editando Datos</h3><p>Modifique solo los campos necesarios. Los campos de DNI e Email del inscripto no se pueden cambiar.</p><label for="edit-dni">DNI Inscripto (Bloqueado)</label><input type="text" id="edit-dni" readonly class="campo-bloqueado"><label for="edit-email">Email (Bloqueado)</label><input type="email" id="edit-email" readonly class="campo-bloqueado"><label for="edit-adultoResponsable1">Adulto Responsable 1</label><input type="text" id="edit-adultoResponsable1" class="form-cache"><label for="edit-dniResponsable1">DNI Responsable 1</label><input type="tel" id="edit-dniResponsable1" class="form-cache" maxlength="8" pattern="[0-9]{8}"><label for="edit-telResp1">Tel. Responsable 1 (Ej: (261) 5123456)</label><input type="tel" id="edit-telResp1" class="form-cache"><label for="edit-adultoResponsable2">Adulto Responsable 2 (Opcional)</label><input type="text" id="edit-adultoResponsable2" class="form-cache"><label for="edit-telResp2">Tel. Responsable 2 (Opcional)</label><input type="tel" id="edit-telResp2" class="form-cache"><label>Personas Autorizadas (Edite la lista completa)</label><div id="edit-autorizados-container"></div><button type="button" id="btn-edit-add-autorizado" class="btn-dinamico" style="width: auto;">+ Agregar Autorizado</button><label for="edit-aptitud-upload" style="margin-top: 15px;">Reemplazar Certificado de Aptitud (Opcional)</label><p style="font-size: 0.9em; margin-bottom: 10px;">(Solo seleccione un archivo si desea reemplazar el existente o subir uno nuevo).</p><input type="file" id="edit-aptitud-upload" accept="image/jpeg, image/png, application/pdf"><label for="edit-aptitud-upload" class="file-input-label">Seleccionar Nuevo Certificado</label><span id="edit-aptitud-name" class="file-name">Ningún archivo seleccionado</span><div class="loader-archivo" id="loader-edit-aptitud"></div><input type="hidden" id="edit-urlCertificadoAptitud"><div style="display: flex; gap: 10px; margin-top: 20px;"><button type="button" id="btn-guardar-cambios" class="btn-guardar" style="width: 50%;">Guardar Cambios</button><button type="button" id="btn-cancelar-edicion" class="btn-cancelar" style="width: 50%;">Cancelar</button></div></div></div>`;
 
       statusDiv.innerHTML = html;
+      const tokenContainer = document.createElement('div');
+      tokenContainer.id = 'token-flow-container';
+      tokenContainer.style.marginTop = '15px';
+      statusDiv.appendChild(tokenContainer);
 
       // (Listeners)
       if (response.adeudaAptitud === true) {
@@ -442,7 +446,7 @@
         btnFinalizar.addEventListener('click', () => { window.top.location.href = APP_URL; });
       }
 
-      document.getElementById('btn-mostrar-editar').addEventListener('click', mostrarFormEdicion);
+      document.getElementById('btn-mostrar-editar').addEventListener('click', solicitarTokenParaEditar); // (CORRECCIÓN) Llamar a la función del token
       document.getElementById('btn-cancelar-edicion').addEventListener('click', ocultarFormEdicion);
       document.getElementById('btn-edit-add-autorizado').addEventListener('click', () => addAutorizadoCamposEdicion());
       document.getElementById('edit-aptitud-upload').addEventListener('change', manejarSubidaAptitudEdicion);
@@ -459,7 +463,145 @@
   }
 
   // ... (El resto de las funciones de js.html siguen aquí) ...
+
+  /**
+   * (NUEVO) Inicia el flujo de validación por token al hacer clic en "Editar Datos".
+   */
+  function solicitarTokenParaEditar() {
+    // Limpiar cualquier temporizador anterior
+    if (window.tokenTimerInterval) clearInterval(window.tokenTimerInterval);
+    const editButton = document.getElementById('btn-mostrar-editar');
+    const tokenFlowContainer = document.getElementById('token-flow-container');
+
+    if (!datosEdicionGlobales || !datosEdicionGlobales.dni) {
+      tokenFlowContainer.innerHTML = `<div class="mensaje error">Error: No se pudo obtener el DNI para la verificación.</div>`;
+      return;
+    }
+    const dni = datosEdicionGlobales.dni;
+    editButton.disabled = true;
+
+    // (NUEVO) Lógica de la barra de progreso
+    tokenFlowContainer.innerHTML = `
+        <p style="text-align:center; font-weight:bold; margin-top:15px;">Generando código de seguridad...</p>
+        <div id="progress-bar-container">
+            <div id="progress-bar">0%</div>
+        </div>`;
+    
+    const progressBar = document.getElementById('progress-bar');
+    setTimeout(() => {
+        progressBar.style.transition = 'width 1.8s ease-out';
+        progressBar.style.width = '100%';
+        progressBar.textContent = 'Enviando...';
+    }, 100);
+
+    setTimeout(() => {
+      google.script.run.withSuccessHandler(onTokenEnviado).withFailureHandler(handleValidationFailure).generarYEnviarToken(dni);
+    }, 2000); // Llamada al servidor después de 2 segundos
+  }
+
+  /**
+   * (NUEVO) Se ejecuta cuando el token se envía correctamente por email.
+   * Muestra la sección para ingresar el token.
+   */
+  function onTokenEnviado(response) {
+    const editButton = document.getElementById('btn-mostrar-editar');
+    const tokenFlowContainer = document.getElementById('token-flow-container');
+    editButton.disabled = false;
+
+    if (response.status === 'OK') {
+      // (CORRECCIÓN DEFINITIVA) Clonar el nodo en lugar de moverlo.
+      // Esto asegura que el #token-seccion original nunca se pierda del DOM.
+      const tokenSeccionOriginal = document.getElementById('token-seccion');
+      const tokenSeccionClone = tokenSeccionOriginal.cloneNode(true);
+      
+      // Asignar un ID único al clon para que los selectores funcionen
+      tokenSeccionClone.id = 'token-seccion-clonada';
+
+      tokenFlowContainer.innerHTML = ''; // Limpiar el loader
+      tokenFlowContainer.appendChild(tokenSeccionClone);
+      tokenSeccionClone.style.display = 'block';
+      document.getElementById('status-token-envio').innerHTML = `<div class="mensaje exito">${response.message}</div>`;
+
+      // Lógica de eventos para el CLON
+      const tokenInputs = document.querySelectorAll('.token-input');
+      tokenInputs.forEach((input, index) => {
+        input.addEventListener('keyup', (e) => {
+          if (e.key >= 0 && e.key <= 9 && index < tokenInputs.length - 1) {
+            tokenInputs[index + 1].focus();
+          } else if (e.key === 'Backspace' && index > 0) {
+            tokenInputs[index - 1].focus();
+          }
+        });
+
+        input.addEventListener('paste', (e) => {
+          const pasteData = (e.clipboardData || window.clipboardData).getData('text').trim();
+          if (/^\d{6}$/.test(pasteData)) {
+            e.preventDefault();
+            pasteData.split('').forEach((char, i) => {
+              if (i < tokenInputs.length) { tokenInputs[i].value = char; }
+            });
+            document.getElementById('btn-validar-token').focus();
+          }
+        });
+      });
+
+      tokenSeccionClone.querySelector('#btn-validar-token').addEventListener('click', function() {
+        let token = '';
+        tokenInputs.forEach(input => token += input.value);
+
+        if (token.length !== 6) {
+          document.getElementById('status-token-validacion').innerHTML = `<div class="mensaje error">Por favor, ingrese los 6 dígitos del código.</div>`;
+          return;
+        }
+
+        const dni = document.getElementById('dni-input').value;
+        this.disabled = true;
+        tokenSeccionClone.querySelector('#loader-token').style.display = 'block';
+        tokenSeccionClone.querySelector('#status-token-validacion').innerHTML = '';
+
+        google.script.run
+          .withSuccessHandler(onTokenValidado)
+          .withFailureHandler(handleValidationFailure)
+          .validarToken(dni, token);
+      });
+      // Fin de la restauración de eventos.
+
+      iniciarTemporizadorToken(); // (CORRECCIÓN) Se restaura la llamada al temporizador.
+      tokenSeccionClone.querySelector('.token-input').focus();
+    } else {
+      tokenFlowContainer.innerHTML = `<div class="mensaje error">${response.message}</div>`;
+    }
+  }
+
+  /**
+   * (NUEVO) Se ejecuta cuando el token ingresado es validado.
+   * Si es correcto, muestra el formulario de edición.
+   */
+  function onTokenValidado(response) { // (CORRECCIÓN) Implementación completa de la función.
+    const tokenClone = document.getElementById('token-seccion-clonada');
+    if (tokenClone) {
+      tokenClone.querySelector('#loader-token').style.display = 'none';
+      tokenClone.querySelector('#btn-validar-token').disabled = false;
+    }
+
+    if (response.status === 'OK') {
+      // Ocultar la sección del token y mostrar el formulario de edición
+      if (tokenClone) tokenClone.style.display = 'none';
+
+      mostrarFormEdicion(); // Llama a la función que prepara y muestra el form de edición
+    } else {
+      if (tokenClone) {
+        tokenClone.querySelector('#status-token-validacion').innerHTML = `<div class="mensaje error">${response.message}</div>`;
+        tokenClone.querySelectorAll('.token-input').forEach(input => input.value = '');
+        tokenClone.querySelector('.token-input').focus();
+      }
+    }
+  }
+
   function mostrarFormEdicion() {
+    // (NUEVO) Iniciar el temporizador de 3 minutos para la edición
+    iniciarTemporizadorEdicion();
+
     if (!datosEdicionGlobales) {
       alert('Error: No se cargaron los datos para editar.');
       return;
@@ -503,12 +645,43 @@
   }
 
   function ocultarFormEdicion() {
+    // (NUEVO) Detener el temporizador de edición si el usuario cancela
+    if (window.editTimerInterval) clearInterval(window.editTimerInterval);
+
     document.getElementById('editar-form-container').style.display = 'none';
     document.getElementById('btn-mostrar-editar').style.display = 'block';
     document.getElementById('edit-aptitud-upload').value = '';
     document.getElementById('edit-aptitud-name').textContent = 'Ningún archivo seleccionado';
     document.getElementById('edit-urlCertificadoAptitud').value = '';
   }
+
+  /**
+   * (CORRECCIÓN) Se restaura la función del temporizador del token.
+   */
+  function iniciarTemporizadorToken() {
+    let duracion = 120; // 2 minutos en segundos
+    const timerDisplay = document.querySelector('#token-seccion-clonada #token-timer');
+    if (!timerDisplay) return;
+
+    if (window.tokenTimerInterval) clearInterval(window.tokenTimerInterval);
+
+    window.tokenTimerInterval = setInterval(function () {
+      const minutos = parseInt(duracion / 60, 10);
+      const segundos = parseInt(duracion % 60, 10);
+
+      const minutosStr = minutos < 10 ? "0" + minutos : minutos;
+      const segundosStr = segundos < 10 ? "0" + segundos : segundos;
+
+      timerDisplay.textContent = `Tiempo restante: ${minutosStr}:${segundosStr}`;
+
+      if (--duracion < 0) {
+        clearInterval(window.tokenTimerInterval);
+        // (NUEVO) Mostrar modal personalizado en lugar de alert
+        mostrarModalExpirado("El tiempo para ingresar el código ha expirado. El formulario se reiniciará.");
+      }
+    }, 1000);
+  }
+
 
   function manejarSubidaAptitudEdicion() {
     const inputElement = document.getElementById('edit-aptitud-upload');
@@ -568,6 +741,9 @@
   }
 
   function submitDatosEditados() {
+    // (NUEVO) Detener el temporizador de edición al guardar
+    if (window.editTimerInterval) clearInterval(window.editTimerInterval);
+
     const dni = document.getElementById('edit-dni').value;
 
     const datosEditados = {
@@ -634,7 +810,10 @@
         document.getElementById('btn-cancelar-edicion').disabled = false;
 
         if (response.status === 'OK') {
-          alert('¡Datos actualizados con éxito! La página se recargará.');
+          // (NUEVO) Al guardar, reiniciar el formulario
+          // (CORRECCIÓN) Limpiar el caché antes de recargar la página.
+          limpiarCache();
+          alert('¡Datos actualizados con éxito! La página se reiniciará.');
           window.top.location.href = APP_URL;
         } else {
           statusDiv.innerHTML = `<div class="mensaje error" style="margin-bottom:10px;">Error al guardar: ${response.message}</div>`;
@@ -647,6 +826,43 @@
         statusDiv.innerHTML = `<div class="mensaje error" style="margin-bottom:10px;">Error de conexión: ${error.message}</div>`;
       })
       .actualizarDatosPersonales(dni, datosEditados);
+  }
+
+  /**
+   * (NUEVO) Inicia y muestra el temporizador de 2 minutos para la edición.
+   */
+  function iniciarTemporizadorEdicion() {
+    let duracion = 10; // 3 minutos en segundos
+    const timerDisplay = document.getElementById('edit-timer'); // (CORRECCIÓN) Usar getElementById que es más directo.
+    if (!timerDisplay) return;
+    
+    // (RESTAURADO) Aplicar estilos directamente con JS para garantizar la visibilidad.
+    timerDisplay.style.float = 'right';
+    timerDisplay.style.fontSize = '1rem';
+    timerDisplay.style.fontWeight = 'bold';
+    timerDisplay.style.color = 'white';
+    timerDisplay.style.backgroundColor = '#e74c3c';
+    timerDisplay.style.padding = '5px 10px';
+    timerDisplay.style.borderRadius = '20px';
+    timerDisplay.style.marginLeft = '15px';
+    timerDisplay.style.display = 'inline-block';
+    if (window.editTimerInterval) clearInterval(window.editTimerInterval);
+
+    window.editTimerInterval = setInterval(function () {
+      const minutos = parseInt(duracion / 60, 10);
+      const segundos = parseInt(duracion % 60, 10);
+
+      const minutosStr = minutos < 10 ? "0" + minutos : minutos;
+      const segundosStr = segundos < 10 ? "0" + segundos : segundos;
+
+      timerDisplay.textContent = `(Tiempo restante: ${minutosStr}:${segundosStr})`;
+
+      if (--duracion < 0) {
+        clearInterval(window.editTimerInterval);
+        // (NUEVO) Mostrar modal personalizado en lugar de alert
+        mostrarModalExpirado("Se agotó el tiempo para editar el formulario. Vuelva a intentar nuevamente.");
+      }
+    }, 1000);
   }
 
   function submitAptitudManual() {

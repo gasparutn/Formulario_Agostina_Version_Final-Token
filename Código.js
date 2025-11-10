@@ -785,17 +785,15 @@ function gestionarUsuarioYaRegistrado(
   const nombreCompleto = `${nombreRegistrado} ${apellidoRegistrado}`;
   const estadoInscripto = rangoFila[COL_ESTADO_NUEVO_ANT - 1];
   const estadoInscriptoTrim = estadoInscripto
-    ? String(estadoInscripto).trim().toLowerCase()
+    ? String(estadoInscripto).trim() // (CORRECCIÓN) Se elimina toLowerCase() para respetar mayúsculas.
     : "";
-  
   // --- (CORRECCIÓN) Lógica de validación ESTRICTA para TODOS, incluyendo hermanos ---
   // Se elimina la flexibilidad anterior. La validación debe ser consistente.
   if (
     (estadoInscriptoTrim.includes("anterior") && tipoInscripto !== "anterior") ||
-    (estadoInscriptoTrim.includes("nuevo") && tipoInscripto !== "nuevo") ||
-    (estadoInscriptoTrim.includes("pre-venta") && tipoInscripto !== "preventa")
+    (estadoInscriptoTrim.includes("nuevo") && tipoInscripto !== "nuevo")
   ) {
-    // (CORRECCIÓN) Mensaje de error mejorado para guiar al usuario.
+    // (CORRECCIÓN) Se quita la validación de 'pre-venta' de aquí. Si un usuario de pre-venta
     let tipoCorrecto = "Soy Nuevo Inscripto"; // Default
     if (estadoInscriptoTrim.includes("anterior")) {
       tipoCorrecto = "Soy Inscripto Anterior";
@@ -808,6 +806,17 @@ function gestionarUsuarioYaRegistrado(
       message: `Este DNI ya está registrado en la categoría "${estadoInscripto}". Por favor, seleccione la opción "<strong>${tipoCorrecto}</strong>" y valide de nuevo.`,
     };
   }
+  // (NUEVO) Se añade la validación de Pre-Venta aquí, para que sea estricta.
+  if (estadoInscriptoTrim.includes("Pre-Venta") && tipoInscripto !== "preventa") {
+      return {
+      status: "ERROR",
+      message: `Este DNI ya está registrado en la categoría "${estadoInscripto}". Por favor, seleccione la opción "<strong>Soy Inscripto PRE-VENTA</strong>" y valide de nuevo.`,
+    };
+  }
+
+
+
+
 
 
   const idFamiliar = rangoFila[COL_VINCULO_PRINCIPAL - 1];
