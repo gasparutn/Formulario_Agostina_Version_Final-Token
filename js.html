@@ -55,6 +55,11 @@
     }
   }
 
+  /**
+  * (CORREGIDO)
+  * - Añadido el botón "Volver al Formulario" al HTML de respuesta.
+  * - Añadido el event listener para ese botón.
+  */
   function handlePagoSuccess(response) {
     document.getElementById('registroForm').style.display = 'none';
     document.getElementById('loader-registro').style.display = 'none';
@@ -74,7 +79,7 @@
     let htmlHermanos = '';
     if (isFinalRegistration) {
       localStorage.removeItem('pendingSiblings');
-      htmlHermanos = `<div class="hermanos-post-registro"><h4>¡Registro Familiar Completo!</h4><p>Todos los hermanos/as han sido registrados exitosamente.</p></div>`;
+      htmlHermanos = `<div class="hermanos-post-registro; text-align:justify"><h4>¡Registro Familiar Completo!</h4><p>Todos los hermanos/as han sido registrados exitosamente.</p></div>`;
     } else if (listToDisplay.length > 0) {
       localStorage.setItem('pendingSiblings', JSON.stringify(listToDisplay));
       htmlHermanos = `<div class="hermanos-post-registro"><h4>¡Atención! Hermanos/as Pendientes</h4><p>El registro de <strong>${response.datos.nombre} ${response.datos.apellido}</strong> fue exitoso.</p><p>Quedan los siguientes hermanos/as por completar (requieren sus propios datos de salud, fotos, etc.):</p><ul>`;
@@ -85,12 +90,21 @@
     } else {
       localStorage.removeItem('pendingSiblings');
     }
+    
+    // --- INICIO DE LA CORRECCIÓN ---
+    // 1. Definir el HTML del botón que faltaba
+    const botonVolverHTML = `
+      <button type="button" id="btn-volver-limpiar-final" class="btn-final-volver" style="background-color: var(--color-principal); margin-top: 20px;">
+        Volver al Formulario</button>`;
+    // --- FIN DE LA CORRECCIÓN ---
 
     if (response && (response.status === 'OK_EFECTIVO' || response.status === 'OK_REGISTRO_SIN_PAGO')) {
-      statusDiv.innerHTML = `<div class="mensaje exito">${response.message}</div>${htmlHermanos}`;
+      // 2. Añadir el botón al HTML
+      statusDiv.innerHTML = `<div class="mensaje exito">${response.message}</div>${htmlHermanos}${botonVolverHTML}`;
     } else {
       const errorMessage = response.message || 'Ocurrió un error desconocido en el paso 2.';
-      statusDiv.innerHTML = `<div class="mensaje error"><strong>Error:</strong> ${errorMessage}</div>${htmlHermanos}`;
+      // 2. Añadir el botón también en caso de error
+      statusDiv.innerHTML = `<div class="mensaje error"><strong>Error:</strong> ${errorMessage}</div>${htmlHermanos}${botonVolverHTML}`;
     }
 
     document.querySelectorAll('.btn-completar-hermano').forEach(btn => {
@@ -100,6 +114,17 @@
         window.top.location.href = APP_URL;
       });
     });
+
+    // --- INICIO DE LA CORRECCIÓN ---
+    // 3. Añadir el listener para el nuevo botón
+    const btnVolver = document.getElementById('btn-volver-limpiar-final');
+    if (btnVolver) {
+      btnVolver.addEventListener('click', function () {
+        limpiarCache(); // Función de js2.html
+        window.top.location.href = APP_URL; // Constante global
+      });
+    }
+    // --- FIN DE LA CORRECCIÓN ---
   }
 
   function handlePagoFailure(error) {
@@ -174,7 +199,7 @@
       const comprobantesCompletosResp = !!response.comprobantesCompletos;
       if (!tieneCuotasPendientes && comprobantesCompletosResp && response.adeudaAptitud !== true) {
         // Mensaje final (reemplazado según petición del usuario)
-        html += `<div class="mensaje exito" style="margin-bottom:10px; text-align:left;"><h3>¡Inscripción confirmada!</h3><p>¡Genial, ${nombreCompleto}! Su inscripción a la Colonia de Verano está confirmada y ya figura completa en nuestro sistema.</p><p style="margin-top:10px;">Si necesita modificar algún dato de contacto, puede hacerlo validando nuevamente con su DNI y accedará al formulario.</p></div>`;
+        html += `<div class="mensaje exito" style="margin-bottom:10px; text-align:justify;"><h3>¡Inscripción confirmada!</h3><p>¡Genial, ${nombreCompleto}! Su inscripción a la Colonia de Verano está confirmada y ya figura completa en nuestro sistema. Si necesita modificar algún dato de contacto, puede hacerlo validando nuevamente con su DNI y accedará al formulario.</p></div>`;
         // Nota: NO hacemos 'return' aquí para permitir que la sección de 'Editar' se agregue después
       }
 
@@ -189,7 +214,7 @@
 
         // Si no hay cuotas pendientes, mostrar mensaje personalizado solicitado
         if (pendientes === 0) {
-          html += `<div class="mensaje aviso" style="margin-bottom:10px; text-align:justify;"><strong>${nombreCompleto} ya se encuentra inscripto/a. Cualquier duda que surja, no dude en comunicarse con la Administración. Muchas Gracias!!</strong></div>`;
+          html += `<div class="mensaje aviso" style="margin-bottom:10px; text-align:justify;"><strong>"Recuerde subir comprobante de transferencia y/o comprobante otorgado por el CLUB, validando nuevamente por el formulario con el dni del inscripto/a". Cualquier duda que surja no dude en comunicarse con la Administración. Muchas Gracias!!</strong></div>`;
         } else {
           let cuotaMsg = `Tiene ${pendientes} cuota${pendientes !== 1 ? 's' : ''} pendiente${pendientes !== 1 ? 's' : ''} de ${cantCuotas}.`;
 

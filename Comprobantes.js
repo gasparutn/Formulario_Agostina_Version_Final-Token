@@ -334,26 +334,29 @@ function subirComprobanteManual(
         }
 
         // 8. SETEAR ESTADO CUOTAS (Columnas AE, AF, AG)
-        if (esTotal) {
-          hoja
-            .getRange(filaAfectada, COL_CUOTA_1, 1, 3)
-            .setValues([["Pagada", "Pagada", "Pagada"]]);
-        } else {
-          // Solo marcar las cuotas pagadas AHORA
-          cuotasPagadasAhora.forEach((cuota) => {
-            if (cuota === "mp_cuota_1")
-              hoja
-                .getRange(filaAfectada, COL_CUOTA_1)
-                .setValue("Pagada (En revisión)"); // AE
-            if (cuota === "mp_cuota_2")
-              hoja
-                .getRange(filaAfectada, COL_CUOTA_2)
-                .setValue("Pagada (En revisión)"); // AF
-            if (cuota === "mp_cuota_3")
-              hoja
-                .getRange(filaAfectada, COL_CUOTA_3)
-                .setValue("Pagada (En revisión)"); // AG
-          });
+        // (CORRECCIÓN) Solo modificar columnas de cuotas si el método de pago es "Pago en Cuotas"
+        if (metodoPago === "Pago en Cuotas") {
+          if (esTotal) {
+            hoja
+              .getRange(filaAfectada, COL_CUOTA_1, 1, 3)
+              .setValues([["Pagada", "Pagada", "Pagada"]]);
+          } else {
+            // Solo marcar las cuotas pagadas AHORA
+            cuotasPagadasAhora.forEach((cuota) => {
+              if (cuota === "mp_cuota_1")
+                hoja
+                  .getRange(filaAfectada, COL_CUOTA_1)
+                  .setValue("Pagada (En revisión)"); // AE
+              if (cuota === "mp_cuota_2")
+                hoja
+                  .getRange(filaAfectada, COL_CUOTA_2)
+                  .setValue("Pagada (En revisión)"); // AF
+              if (cuota === "mp_cuota_3")
+                hoja
+                  .getRange(filaAfectada, COL_CUOTA_3)
+                  .setValue("Pagada (En revisión)"); // AG
+            });
+          }
         }
 
         // 9. Devolver el estado calculado para el mensaje de éxito
@@ -460,6 +463,7 @@ function subirComprobanteManual(
             let filaDatos = hoja
               .getRange(filaHermano, 1, 1, hoja.getLastColumn())
               .getValues()[0];
+            const metodoPagoHermano = filaDatos[COL_METODO_PAGO - 1]; // Leer el método de pago del hermano
             const cantidadCuotasHermano =
               parseInt(filaDatos[COL_CANTIDAD_CUOTAS - 1]) || 0;
 
@@ -486,18 +490,21 @@ function subirComprobanteManual(
             }
 
             // 2) Marcar las cuotas pagadas AHORA (solo modificar AE/AF/AG)
-            if (cuotasPagadasAhora.has("mp_cuota_1"))
-              hoja
-                .getRange(filaHermano, COL_CUOTA_1)
-                .setValue("Pagada (En revisión)");
-            if (cuotasPagadasAhora.has("mp_cuota_2"))
-              hoja
-                .getRange(filaHermano, COL_CUOTA_2)
-                .setValue("Pagada (En revisión)");
-            if (cuotasPagadasAhora.has("mp_cuota_3"))
-              hoja
-                .getRange(filaHermano, COL_CUOTA_3)
-                .setValue("Pagada (En revisión)");
+            // (CORRECCIÓN) Solo ejecutar si el método de pago del hermano es "Pago en Cuotas"
+            if (metodoPagoHermano === "Pago en Cuotas") {
+              if (cuotasPagadasAhora.has("mp_cuota_1"))
+                hoja
+                  .getRange(filaHermano, COL_CUOTA_1)
+                  .setValue("Pagada (En revisión)");
+              if (cuotasPagadasAhora.has("mp_cuota_2"))
+                hoja
+                  .getRange(filaHermano, COL_CUOTA_2)
+                  .setValue("Pagada (En revisión)");
+              if (cuotasPagadasAhora.has("mp_cuota_3"))
+                hoja
+                  .getRange(filaHermano, COL_CUOTA_3)
+                  .setValue("Pagada (En revisión)");
+            }
 
             // 3) Setear comprobantes (AQ/AR/AS/AT) según la cuota pagada y fileUrl
             if (fileUrlHermano) {
