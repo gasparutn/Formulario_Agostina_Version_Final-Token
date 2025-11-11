@@ -273,6 +273,30 @@ function registrarDatos(datos, testSheetName) {
     // Insertar la fila
     hojaRegistro.appendRow(valoresFila);
     const nuevaFila = hojaRegistro.getLastRow();
+    // --- INICIO DE LA CORRECCIÓN: Integrar Cálculo de Grupo y Color ---
+    try {
+      // 1. Obtener la fecha de nacimiento (ya la tenemos en 'datos.fechaNacimiento')
+      const fechaNacStr = datos.fechaNacimiento;
+      
+      if (fechaNacStr) {
+        // 2. Determinar el grupo (usando la función de CalculaEdadGrupoColor.js)
+        const grupo = determinarGrupoPorFecha(fechaNacStr);
+        
+        // 3. Escribir el grupo en la celda de la nueva fila (Columna I)
+        hojaRegistro.getRange(nuevaFila, COL_GRUPOS).setValue(grupo);
+        
+        // 4. Aplicar el color (usando la función de CalculaEdadGrupoColor.js)
+        // (hojaConfig ya está definida al inicio de registrarDatos)
+        aplicarColorGrupo(hojaRegistro, nuevaFila, grupo, hojaConfig);
+        
+        Logger.log(`Grupo [${grupo}] y color aplicados para DNI ${dniLimpio} en fila ${nuevaFila}.`);
+      } else {
+         Logger.log(`No se pudo calcular el grupo para ${dniLimpio}: sin fecha de nacimiento.`);
+      }
+    } catch (e) {
+      Logger.log(`Error al aplicar grupo/color para ${dniLimpio} en fila ${nuevaFila}: ${e.message}`);
+    }
+    // --- FIN DE LA CORRECCIÓN ---
     SpreadsheetApp.flush();
     Logger.log(`Nuevo registro creado para DNI ${dniLimpio} en fila ${nuevaFila}. Turno: ${numeroDeTurno}`);
 
