@@ -3,7 +3,6 @@ const SPREADSHEET_ID = '1Ru-XGng2hYJbUvl-H2IA7aYQx7Ju-jk1LT1fkYOnG0w';
 const NOMBRE_HOJA_BUSQUEDA = 'Base de Datos';
 const NOMBRE_HOJA_REGISTRO = 'Registros';
 const NOMBRE_HOJA_CONFIG = 'Config';
-const NOMBRE_HOJA_CONTADOR = 'Contador'; // <-- CONSTANTE AÑADIDA
 
 const FOLDER_ID_FOTOS = '1S2SbkuYdvcLFZYoHacfgwEU80kAN094l';
 const FOLDER_ID_FICHAS = '1aDsTTDWHiDFUeZ8ByGp8_LY3fdzVQomu';

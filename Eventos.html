@@ -295,7 +295,8 @@ const apellidosHermano = document.querySelectorAll('.hermano-apellido');
 const obrasSocialesHermano = document.querySelectorAll('.hermano-obrasocial'); 
 const colegiosHermano = document.querySelectorAll('.hermano-colegio'); 
 const dnisHermanoInputs = document.querySelectorAll('.hermano-dni'); 
-const fechasNacHermano = document.querySelectorAll('.hermano-fechanac'); // (*** AHORA SÍ FUNCIONA ***)
+const fechasNacHermano = document.querySelectorAll('.hermano-fechanac');
+const tiposHermano = document.querySelectorAll('.hermano-tipo');
 
 // --- (VALIDACIÓN HERMANOS MODIFICADA) ---
 // Limpiar errores previos
@@ -332,7 +333,8 @@ for (let i = 0; i < dnisHermanoInputs.length; i++) {
     obraSocial: obraSocial,
     colegio: colegio,
     dni: dni,
-    fechaNac: fechaNac
+    fechaNac: fechaNac,
+    tipo: tiposHermano[i] ? tiposHermano[i].value : 'nuevo'
   });
 }
 // --- (FIN VALIDACIÓN HERMANOS) ---

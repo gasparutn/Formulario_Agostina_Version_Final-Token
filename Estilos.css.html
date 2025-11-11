@@ -217,7 +217,6 @@
   #btn-limpiar-form,
   #btn-cancelar-upload,
   #btn-pagar-pendiente,
-  #btn-validar-token, /* (NUEVO) Añadido para darle estilo */
   .btn-editar, /* (NUEVO) */
   .btn-guardar, /* (NUEVO) */
   .btn-cancelar /* (NUEVO) */
@@ -699,93 +698,5 @@
     width: 50%;
     margin-top: 0;
     padding: 12px;
-  }
-
-  /* (NUEVO) Estilos para la sección de validación de token */
-  #token-inputs-container {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin: 20px 0;
-  }
-
-  .token-input {
-    width: 45px; /* Tamaño más pequeño */
-    height: 55px; /* Altura acorde */
-    text-align: center;
-    font-size: 1.8em;
-    border: 2px solid #ccc;
-    border-radius: 8px;
-  }
-
-  #token-timer {
-    text-align: center;
-    font-size: 1.1em;
-    font-weight: bold;
-    color: var(--color-principal);
-    margin-top: 15px;
-  }
-
-  #edit-timer {
-    /* (CORRECCIÓN) Estilos para hacer el temporizador prominente */
-    float: right; /* Usar float para posicionar a la derecha */
-    font-size: 1rem; /* Tamaño de fuente base */
-    font-weight: bold;
-    color: white;
-    background-color: #e74c3c; /* Rojo llamativo */
-    padding: 5px 10px;
-    border-radius: 20px; /* Forma de píldora */
-    margin-left: 15px; /* Espacio a la izquierda */
-  }
-
-  /* (NUEVO) Estilos para el Modal de Tiempo Expirado */
-  #expirado-modal-backdrop {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background-color: rgba(0, 0, 0, 0.7);
-    display: none; /* Se activa con JS */
-    justify-content: center;
-    align-items: center;
-    z-index: 2000; /* Por encima de otros modales */
-  }
-  #expirado-modal-content {
-    background-color: white;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-    width: 90%;
-    max-width: 400px;
-    text-align: center;
-  }
-  #expirado-modal-content h4 {
-    color: var(--color-error);
-    margin-top: 0;
-  }
-  #expirado-modal-countdown {
-    margin-top: 20px;
-    font-weight: bold;
-    color: #6c757d;
-  }
-
-  /* (NUEVO) Estilos para la barra de progreso */
-  #progress-bar-container {
-    width: 100%;
-    background-color: #e9ecef;
-    border-radius: 8px;
-    margin-top: 10px;
-    overflow: hidden; /* Para que la barra interna no se salga */
-  }
-  #progress-bar {
-    width: 0%;
-    height: 25px;
-    background-color: var(--color-principal);
-    border-radius: 8px;
-    text-align: center;
-    line-height: 25px;
-    color: white;
-    font-weight: bold;
   }
 </style>
