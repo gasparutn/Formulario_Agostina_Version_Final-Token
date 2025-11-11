@@ -137,12 +137,6 @@ function registrarDatos(datos, testSheetName) {
         hojaRegistro.getRange(filaExistente, COL_ADULTO_RESPONSABLE_2).setValue(datos.adultoResponsable2 || '');
         hojaRegistro.getRange(filaExistente, COL_TEL_RESPONSABLE_2).setValue(telResp2);
         hojaRegistro.getRange(filaExistente, COL_PERSONAS_AUTORIZADAS).setValue(datos.personasAutorizadas || '');
-        hojaRegistro.getRange(filaExistente, COL_PRACTICA_DEPORTE).setValue(datos.practicaDeporte || '');
-        hojaRegistro.getRange(filaExistente, COL_ESPECIFIQUE_DEPORTE).setValue(datos.especifiqueDeporte || '');
-        hojaRegistro.getRange(filaExistente, COL_TIENE_ENFERMEDAD).setValue(datos.tieneEnfermedad || '');
-        hojaRegistro.getRange(filaExistente, COL_ESPECIFIQUE_ENFERMEDAD).setValue(datos.especifiqueEnfermedad || '');
-        hojaRegistro.getRange(filaExistente, COL_ES_ALERGICO).setValue(datos.esAlergico || '');
-        hojaRegistro.getRange(filaExistente, COL_ESPECIFIQUE_ALERGIA).setValue(datos.especifiqueAlergia || '');
         hojaRegistro.getRange(filaExistente, COL_JORNADA).setValue(datos.jornada || '');
         hojaRegistro.getRange(filaExistente, COL_SOCIO).setValue(datos.esSocio || '');
         hojaRegistro.getRange(filaExistente, COL_METODO_PAGO).setValue(datos.metodoPago || '');
@@ -174,11 +168,7 @@ function registrarDatos(datos, testSheetName) {
            hojaRegistro.getRange(filaExistente, COL_VINCULO_PRINCIPAL).setValue(datos.vinculoPrincipal);
         }
 
-        // (MODIFICADO) Llamar a la nueva función de procesamiento de grupo y color
-        const fechaNac = hojaRegistro.getRange(filaExistente, COL_FECHA_NACIMIENTO_REGISTRO).getValue();
-        if (fechaNac instanceof Date) {
-          procesarFilaIndividual(ss, hojaRegistro, filaExistente, fechaNac);
-        }
+        // La lógica de grupos y colores ahora se maneja en el script interno mediante triggers.
 
         SpreadsheetApp.flush();
         const numeroDeTurno = hojaRegistro.getRange(filaExistente, COL_NUMERO_TURNO).getValue();
@@ -213,14 +203,20 @@ function registrarDatos(datos, testSheetName) {
     valoresFila[COL_MARCA_N_E_A - 1] = marcaNE;
 
     // --- INICIO DE LA CORRECCIÓN (FIX #4) ---
-    // Asignar el estado (Nuevo, Anterior, Pre-Venta, o Hermano/a)
+    // (MODIFICADO) Asignar el estado (Nuevo, Anterior, Pre-Venta, o sus variantes de Hermano/a)
     let estadoNuevoAnt = 'Nuevo';
-    if (esPreventaReg) {
-      estadoNuevoAnt = 'Pre-Venta';
-    } else if (datos.tipoInscripto === 'anterior') {
-      estadoNuevoAnt = 'Anterior';
-    } else if (datos.tipoInscripto === 'hermano/a') {
-      estadoNuevoAnt = 'Hermano/a'; // <-- Este es el caso que faltaba
+    if (datos.tipoInscripto === 'hermano/a') {
+      // Si es un hermano, usar su tipo original para construir la etiqueta
+      if (datos.tipoInscripcionOriginal === 'preventa') {
+        estadoNuevoAnt = 'Pre-Venta Hermano/a';
+      } else if (datos.tipoInscripcionOriginal === 'anterior') {
+        estadoNuevoAnt = 'Anterior Hermano/a';
+      } else { // 'nuevo' o por defecto
+        estadoNuevoAnt = 'Nuevo Hermano/a';
+      }
+    } else { // Si no es un hermano, usar la lógica estándar
+      if (esPreventaReg) estadoNuevoAnt = 'Pre-Venta';
+      else if (datos.tipoInscripto === 'anterior') estadoNuevoAnt = 'Anterior';
     }
     valoresFila[COL_ESTADO_NUEVO_ANT - 1] = estadoNuevoAnt;
     // --- FIN DE LA CORRECCIÓN (FIX #4) ---
@@ -245,12 +241,6 @@ function registrarDatos(datos, testSheetName) {
     // --- FIN DE LA CORRECCIÓN (FIX #2) ---
 
     valoresFila[COL_PERSONAS_AUTORIZADAS - 1] = datos.personasAutorizadas || '';
-    valoresFila[COL_PRACTICA_DEPORTE - 1] = datos.practicaDeporte || '';
-    valoresFila[COL_ESPECIFIQUE_DEPORTE - 1] = datos.especifiqueDeporte || '';
-    valoresFila[COL_TIENE_ENFERMEDAD - 1] = datos.tieneEnfermedad || '';
-    valoresFila[COL_ESPECIFIQUE_ENFERMEDAD - 1] = datos.especifiqueEnfermedad || '';
-    valoresFila[COL_ES_ALERGICO - 1] = datos.esAlergico || '';
-    valoresFila[COL_ESPECIFIQUE_ALERGIA - 1] = datos.especifiqueAlergia || '';
 
     if (datos.urlCertificadoAptitud) {
       valoresFila[COL_APTITUD_FISICA - 1] = String(datos.urlCertificadoAptitud).startsWith('=HYPERLINK') ? datos.urlCertificadoAptitud : `=HYPERLINK("${datos.urlCertificadoAptitud}"; "Aptitud_${dniLimpio}")`;
@@ -286,12 +276,7 @@ function registrarDatos(datos, testSheetName) {
     SpreadsheetApp.flush();
     Logger.log(`Nuevo registro creado para DNI ${dniLimpio} en fila ${nuevaFila}. Turno: ${numeroDeTurno}`);
 
-    // (MODIFICADO) Llamar a la nueva función de procesamiento de grupo y color
-    const fechaNacNueva = datos.fechaNacimiento;
-    if (fechaNacNueva) {
-      procesarFilaIndividual(ss, hojaRegistro, nuevaFila, new Date(fechaNacNueva));
-    }
-
+    // La lógica de grupos y colores ahora se maneja en el script interno mediante triggers.
     // Si es Pre-Venta, opcionalmente podríamos marcar el registro en la hoja PRE-VENTA. Por ahora lo dejamos sin borrar.
 
     return { status: 'OK_REGISTRO', message: 'Registro creado con éxito.', numeroDeTurno: numeroDeTurno, datos: datos };
@@ -310,22 +295,10 @@ function registrarDatos(datos, testSheetName) {
 /**
  * Permite a un usuario ya registrado editar campos específicos.
  */
-function actualizarDatosPersonales(dni, token, datosEditados) {
+function actualizarDatosPersonales(dni, datosEditados) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    // --- INICIO DE LA MODIFICACIÓN: Validación de Token ---
-    if (!token) {
-      return { status: "ERROR", message: "Se requiere un código de verificación para actualizar los datos." };
-    }
-
-    // Se asume que la función validarToken está en el proyecto (en token_Editar_Formulario.js)
-    const validacion = validarToken(dni, token);
-    if (validacion.status !== 'OK') {
-      return validacion; // Devuelve el mensaje de error de la validación del token
-    }
-    // --- FIN DE LA MODIFICACIÓN ---
-
     const dniLimpio = limpiarDNI(dni);
     if (!dniLimpio || !datosEditados)
       return {
@@ -409,6 +382,36 @@ function actualizarDatosPersonales(dni, token, datosEditados) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * (MOVIDA AQUÍ)
+ * Calcula la edad en años, meses y días a partir de una fecha de nacimiento.
+ * Se necesita para la función 'validarAcceso'.
+ * @param {Date} fechaNacimiento La fecha de nacimiento.
+ * @returns {{anos: number, meses: number, dias: number}}
+ */
+function calcularEdadDetallada(fechaNacimiento) {
+  if (!fechaNacimiento || !(fechaNacimiento instanceof Date)) {
+    return { anos: 0, meses: 0, dias: 0 };
+  }
+  const hoy = new Date();
+  const fechaNac = new Date(fechaNacimiento);
+  fechaNac.setMinutes(fechaNac.getMinutes() + fechaNac.getTimezoneOffset());
+
+  let anos = hoy.getFullYear() - fechaNac.getFullYear();
+  let meses = hoy.getMonth() - fechaNac.getMonth();
+  let dias = hoy.getDate() - fechaNac.getDate();
+
+  if (dias < 0) {
+    meses--;
+    dias += new Date(hoy.getFullYear(), hoy.getMonth(), 0).getDate();
+  }
+  if (meses < 0) {
+    anos--;
+    meses += 12;
+  }
+  return { anos, meses, dias };
 }
 
 function limpiarDNI(dni) {
@@ -777,32 +780,44 @@ function gestionarUsuarioYaRegistrado(
 
   let estadoPago = rangoFila[COL_ESTADO_PAGO - 1];
   const metodoPago = rangoFila[COL_METODO_PAGO - 1];
-  const jornada = rangoFila[COL_JORNADA - 1];
-  const metodoPagoLimpio = metodoPago ? String(metodoPago).trim() : "";
-  const jornadaLimpia = jornada ? String(jornada).trim() : "";
-
   const nombreRegistrado = rangoFila[COL_NOMBRE - 1];
   const apellidoRegistrado = rangoFila[COL_APELLIDO - 1];
   const nombreCompleto = `${nombreRegistrado} ${apellidoRegistrado}`;
   const estadoInscripto = rangoFila[COL_ESTADO_NUEVO_ANT - 1];
   const estadoInscriptoTrim = estadoInscripto
-    ? String(estadoInscripto).trim().toLowerCase()
+    ? String(estadoInscripto).trim() // (CORRECCIÓN) Se elimina toLowerCase() para respetar mayúsculas.
     : "";
-
+  // --- (CORRECCIÓN) Lógica de validación ESTRICTA para TODOS, incluyendo hermanos ---
+  // Se elimina la flexibilidad anterior. La validación debe ser consistente.
   if (
-    (estadoInscriptoTrim.includes("anterior") &&
-      tipoInscripto !== "anterior") ||
-    (estadoInscriptoTrim.includes("nuevo") && tipoInscripto !== "nuevo") ||
-    (estadoInscriptoTrim.includes("pre-venta") && tipoInscripto !== "preventa") ||
-    // (FIX) Añadir chequeo para hermano/a
-    (estadoInscriptoTrim.includes("hermano/a") && tipoInscripto === "nuevo") ||
-    (estadoInscriptoTrim.includes("hermano/a") && tipoInscripto === "anterior")
+    (estadoInscriptoTrim.includes("anterior") && tipoInscripto !== "anterior") ||
+    (estadoInscriptoTrim.includes("nuevo") && tipoInscripto !== "nuevo")
   ) {
+    // (CORRECCIÓN) Se quita la validación de 'pre-venta' de aquí. Si un usuario de pre-venta
+    let tipoCorrecto = "Soy Nuevo Inscripto"; // Default
+    if (estadoInscriptoTrim.includes("anterior")) {
+      tipoCorrecto = "Soy Inscripto Anterior";
+    } else if (estadoInscriptoTrim.includes("pre-venta")) {
+      tipoCorrecto = "Soy Inscripto PRE-VENTA";
+    }
+
     return {
       status: "ERROR",
-      message: `Este DNI ya está registrado como "${estadoInscripto}". Por favor, seleccione esa opción y valide de nuevo.`,
+      message: `Este DNI ya está registrado en la categoría "${estadoInscripto}". Por favor, seleccione la opción "<strong>${tipoCorrecto}</strong>" y valide de nuevo.`,
     };
   }
+  // (NUEVO) Se añade la validación de Pre-Venta aquí, para que sea estricta.
+  if (estadoInscriptoTrim.includes("Pre-Venta") && tipoInscripto !== "preventa") {
+      return {
+      status: "ERROR",
+      message: `Este DNI ya está registrado en la categoría "${estadoInscripto}". Por favor, seleccione la opción "<strong>Soy Inscripto PRE-VENTA</strong>" y valide de nuevo.`,
+    };
+  }
+
+
+
+
+
 
   const idFamiliar = rangoFila[COL_VINCULO_PRINCIPAL - 1];
   let tieneHermanos = false;
@@ -830,7 +845,8 @@ function gestionarUsuarioYaRegistrado(
 
   // --- (FIX) Modificada la lógica de 'hermano/a' ---
   // Si es 'hermano/a' Y (no tiene método de pago O no tiene jornada) -> debe completar
-  if (estadoInscriptoTrim.includes("hermano/a") && (!metodoPagoLimpio || !jornadaLimpia)) {
+  // (CORRECCIÓN) La validación de tipoInscripto ahora se hace arriba, aquí solo se verifica si debe completar datos.
+  if (estadoInscriptoTrim.includes("hermano/a")) {
     let faltantes = [];
     if (!rangoFila[COL_COLEGIO_JARDIN - 1]) faltantes.push("Colegio");
     if (!rangoFila[COL_FOTO_CARNET - 1]) faltantes.push("Foto Carnet");
@@ -849,18 +865,24 @@ function gestionarUsuarioYaRegistrado(
       obraSocial: rangoFila[COL_OBRA_SOCIAL - 1] || "",
       colegioJardin: rangoFila[COL_COLEGIO_JARDIN - 1] || "",
       // Pasamos el tipo de inscripto correcto
-      tipoInscripto: estadoInscriptoTrim 
+      // --- INICIO DE LA CORRECCIÓN ---
+      // Se ajusta el campo 'tipoInscripto' para que coincida con la lógica del frontend
+      // y se añade 'esHermanoCompletando' para mayor claridad.
+      tipoInscripto: 'hermano/a',
+      esHermanoCompletando: true
     };
     return {
       status: "HERMANO_COMPLETAR",
-      message: `⚠️ ¡Hola ${datosCompletos.nombre}! Eres un hermano/a pre-registrado. Por favor, complete/verifique TODOS los campos.`,
+      message: `⚠️ ¡Hola ${datosCompletos.nombre}! Eres un hermano/a pre-registrado. Por favor, complete/verifique TODOS los campos para finalizar la inscripción.`,
       datos: datosCompletos,
       jornadaExtendidaAlcanzada: estado.jornadaExtendidaAlcanzada,
       tipoInscripto: estadoInscripto, // El tipo de inscripto es 'hermano/a'
       pagoTotalMPVisible: pagoTotalMPVisible,
     };
+    // --- FIN DE LA CORRECCIÓN ---
   }
   // --- (FIN FIX) ---
+
 
 
   // --- (INICIO CORRECCIÓN BUG 0>=0) ---
@@ -1148,8 +1170,7 @@ function gestionarUsuarioYaRegistrado(
   if (
     String(estadoPago).startsWith("Pago total") ||
     String(estadoPago).startsWith("Pagado Total") ||
-    String(estadoPago).startsWith("Pagado")||
-    String(estadoPago).startsWith("Pago Total(Familiar)")
+    String(estadoPago).startsWith("Pagado")
   ) {
     return {
       ...baseResponse,
@@ -1333,23 +1354,20 @@ function subirAptitudManual(dni, fileData) {
   }
 }
 
+/**
+ * (RESTAURADA) Lógica de validación de la versión anterior, que es más precisa.
+ * Valida el DNI de un hermano/a contra las hojas de Registros, Pre-Venta y Base de Datos.
+ */
 function validarDNIHermano(dniHermano, dniPrincipal) {
   try {
     const dniLimpio = limpiarDNI(dniHermano);
     const dniPrincipalLimpio = limpiarDNI(dniPrincipal);
 
     if (!/^[0-9]{8}$/.test(dniLimpio)) {
-      return {
-        status: "ERROR",
-        message: "El DNI del hermano/a debe tener 8 dígitos.",
-      };
+      return { status: 'ERROR', message: 'El DNI del hermano/a debe tener 8 dígitos.' };
     }
     if (dniLimpio === dniPrincipalLimpio) {
-      return {
-        status: "ERROR",
-        message:
-          "El DNI del hermano/a no puede ser igual al del inscripto principal.",
-      };
+      return { status: 'ERROR', message: 'El DNI del hermano/a no puede ser igual al del inscripto principal.' };
     }
 
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -1357,68 +1375,35 @@ function validarDNIHermano(dniHermano, dniPrincipal) {
     // 1. Chequear duplicados en Registros
     const hojaRegistro = ss.getSheetByName(NOMBRE_HOJA_REGISTRO);
     if (hojaRegistro && hojaRegistro.getLastRow() > 1) {
-      const rangoDniRegistro = hojaRegistro.getRange(
-        2,
-        COL_DNI_INSCRIPTO,
-        hojaRegistro.getLastRow() - 1,
-        1
-      );
-      const celdaRegistro = rangoDniRegistro
-        .createTextFinder(dniLimpio)
-        .matchEntireCell(true)
-        .findNext();
+      const rangoDniRegistro = hojaRegistro.getRange(2, COL_DNI_INSCRIPTO, hojaRegistro.getLastRow() - 1, 1);
+      const celdaRegistro = rangoDniRegistro.createTextFinder(dniLimpio).matchEntireCell(true).findNext();
       if (celdaRegistro) {
-        return {
-          status: "ERROR",
-          message: `El DNI ${dniLimpio} ya se encuentra registrado en la base de datos (Fila ${celdaRegistro.getRow()}). No se puede agregar como hermano.`,
-        };
+        return { status: 'ERROR', message: `El DNI ${dniLimpio} ya se encuentra registrado en la base de datos (Fila ${celdaRegistro.getRow()}). No se puede agregar como hermano.` };
       }
     }
 
     // 2. Chequear en PRE-VENTA
     const hojaPreventa = ss.getSheetByName(NOMBRE_HOJA_PREVENTA);
     if (hojaPreventa && hojaPreventa.getLastRow() > 1) {
-      const rangoDniPreventa = hojaPreventa.getRange(
-        2,
-        COL_PREVENTA_DNI,
-        hojaPreventa.getLastRow() - 1,
-        1
-      );
-      const celdaEncontradaPreventa = rangoDniPreventa
-        .createTextFinder(dniLimpio)
-        .matchEntireCell(true)
-        .findNext();
+      const rangoDniPreventa = hojaPreventa.getRange(2, COL_PREVENTA_DNI, hojaPreventa.getLastRow() - 1, 1);
+      const celdaEncontradaPreventa = rangoDniPreventa.createTextFinder(dniLimpio).matchEntireCell(true).findNext();
 
       if (celdaEncontradaPreventa) {
-        const fila = hojaPreventa
-          .getRange(
-            celdaEncontradaPreventa.getRow(),
-            1,
-            1,
-            hojaPreventa.getLastColumn()
-          )
-          .getValues()[0];
+        const fila = hojaPreventa.getRange(celdaEncontradaPreventa.getRow(), 1, 1, hojaPreventa.getLastColumn()).getValues()[0];
         const fechaNacimientoRaw = fila[COL_PREVENTA_FECHA_NAC - 1];
-        const fechaNacimientoStr =
-          fechaNacimientoRaw instanceof Date
-            ? Utilities.formatDate(
-                fechaNacimientoRaw,
-                ss.getSpreadsheetTimeZone(),
-                "yyyy-MM-dd"
-              )
-            : "";
+        const fechaNacimientoStr = (fechaNacimientoRaw instanceof Date) ? Utilities.formatDate(fechaNacimientoRaw, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd') : '';
 
         return {
-          status: "OK_PREVENTA",
-          message:
-            "¡DNI de Pre-Venta encontrado! Se autocompletarán los datos del hermano/a.",
+          status: 'OK_PREVENTA',
+          message: '¡DNI de Pre-Venta encontrado! Se autocompletarán los datos del hermano/a.',
           datos: {
             dni: dniLimpio,
             nombre: fila[COL_PREVENTA_NOMBRE - 1],
             apellido: fila[COL_PREVENTA_APELLIDO - 1],
-            fechaNacimiento: fechaNacimientoStr,
-            obraSocial: "",
-            colegio: "",
+            fechaNac: fechaNacimientoStr,
+            obraSocial: '',
+            colegio: '',
+            tipo: 'preventa'
           },
         };
       }
@@ -1427,49 +1412,25 @@ function validarDNIHermano(dniHermano, dniPrincipal) {
     // 3. Chequear en Base de Datos (Anteriores)
     const hojaBusqueda = ss.getSheetByName(NOMBRE_HOJA_BUSQUEDA);
     if (hojaBusqueda && hojaBusqueda.getLastRow() > 1) {
-      const rangoDNI = hojaBusqueda.getRange(
-        2,
-        COL_DNI_BUSQUEDA,
-        hojaBusqueda.getLastRow() - 1,
-        1
-      );
-
-      const celdaEncontrada_BD = rangoDNI
-        .createTextFinder(dniLimpio)
-        .matchEntireCell(true)
-        .findNext();
+      const rangoDNI = hojaBusqueda.getRange(2, COL_DNI_BUSQUEDA, hojaBusqueda.getLastRow() - 1, 1);
+      const celdaEncontrada_BD = rangoDNI.createTextFinder(dniLimpio).matchEntireCell(true).findNext();
 
       if (celdaEncontrada_BD) {
-        const fila = hojaBusqueda
-          .getRange(celdaEncontrada_BD.getRow(), COL_HABILITADO_BUSQUEDA, 1, 10)
-          .getValues()[0];
-
-        const fechaNacimientoRaw =
-          fila[COL_FECHA_NACIMIENTO_BUSQUEDA - COL_HABILITADO_BUSQUEDA]; // Col E (idx 3)
-        const fechaNacimientoStr =
-          fechaNacimientoRaw instanceof Date
-            ? Utilities.formatDate(
-                fechaNacimientoRaw,
-                ss.getSpreadsheetTimeZone(),
-                "yyyy-MM-dd"
-              )
-            : "";
+        const fila = hojaBusqueda.getRange(celdaEncontrada_BD.getRow(), COL_HABILITADO_BUSQUEDA, 1, 10).getValues()[0];
+        const fechaNacimientoRaw = fila[COL_FECHA_NACIMIENTO_BUSQUEDA - COL_HABILITADO_BUSQUEDA];
+        const fechaNacimientoStr = (fechaNacimientoRaw instanceof Date) ? Utilities.formatDate(fechaNacimientoRaw, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd') : '';
 
         return {
-          status: "OK_ANTERIOR",
-          message:
-            "¡DNI de Inscripto Anterior encontrado! Se autocompletarán los datos del hermano/a.",
+          status: 'OK_ANTERIOR',
+          message: '¡DNI de Inscripto Anterior encontrado! Se autocompletarán los datos del hermano/a.',
           datos: {
             dni: dniLimpio,
-            nombre: fila[COL_NOMBRE_BUSQUEDA - COL_HABILITADO_BUSQUEDA], // Col C (idx 1)
-            apellido: fila[COL_APELLIDO_BUSQUEDA - COL_HABILITADO_BUSQUEDA], // Col D (idx 2)
-            fechaNacimiento: fechaNacimientoStr,
-            obraSocial: String(
-              fila[COL_OBRASOCIAL_BUSQUEDA - COL_HABILITADO_BUSQUEDA] || ""
-            ).trim(), // Col H (idx 6)
-            colegio: String(
-              fila[COL_COLEGIO_BUSQUEDA - COL_HABILITADO_BUSQUEDA] || ""
-            ).trim(), // Col I (idx 7)
+            nombre: fila[COL_NOMBRE_BUSQUEDA - COL_HABILITADO_BUSQUEDA],
+            apellido: fila[COL_APELLIDO_BUSQUEDA - COL_HABILITADO_BUSQUEDA],
+            fechaNac: fechaNacimientoStr,
+            obraSocial: String(fila[COL_OBRASOCIAL_BUSQUEDA - COL_HABILITADO_BUSQUEDA] || '').trim(),
+            colegio: String(fila[COL_COLEGIO_BUSQUEDA - COL_HABILITADO_BUSQUEDA] || '').trim(),
+            tipo: 'anterior'
           },
         };
       }
@@ -1477,21 +1438,21 @@ function validarDNIHermano(dniHermano, dniPrincipal) {
 
     // 4. No encontrado (Nuevo)
     return {
-      status: "OK_NUEVO",
-      message:
-        "DNI no encontrado en Pre-Venta ni en registros Anteriores. Por favor, complete todos los datos del hermano/a.",
+      status: 'OK_NUEVO',
+      message: 'DNI no encontrado en Pre-Venta ni en registros Anteriores. Por favor, complete todos los datos del hermano/a.',
       datos: {
         dni: dniLimpio,
-        nombre: "",
-        apellido: "",
-        fechaNacimiento: "",
-        obraSocial: "",
-        colegio: "",
+        nombre: '',
+        apellido: '',
+        fechaNac: '',
+        obraSocial: '',
+        colegio: '',
+        tipo: 'nuevo'
       },
     };
   } catch (e) {
     Logger.log("Error en validarDNIHermano: " + e.message);
-    return { status: "ERROR", message: "Error del servidor: " + e.message };
+    return { status: 'ERROR', message: 'Error del servidor: ' + e.message };
   }
 }
 

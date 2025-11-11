@@ -64,11 +64,7 @@ function generarYEnviarToken(dni) {
     });
 
     Logger.log(`Token ${token} enviado a ${emailResponsable} para DNI ${dniLimpio}.`);
-    return {
-      status: 'OK',
-      message: `Se ha enviado un código de 6 dígitos a <strong>${emailResponsable}</strong>. Por favor, ingréselo para continuar.`,
-      tokenExpirationMinutes: TOKEN_EXPIRATION_MINUTES
-    };
+    return { status: 'OK', message: `Se ha enviado un código de 6 dígitos a <strong>${emailResponsable}</strong>. Por favor, ingréselo para continuar.` };
 
   } catch (e) {
     Logger.log("Error en generarYEnviarToken: " + e.message);
@@ -88,20 +84,20 @@ function validarToken(dni, tokenIngresado) {
   const propertyKey = `token_${dniLimpio}`;
   const tokenDataString = scriptProperties.getProperty(propertyKey);
 
+  // Eliminar el token inmediatamente para que sea de un solo uso
+  scriptProperties.deleteProperty(propertyKey);
+
   if (!tokenDataString) {
     Logger.log(`Intento de validación de token fallido para DNI ${dniLimpio}.`);
-    return { status: 'ERROR', message: 'El código de verificación es incorrecto o ha expirado. Por favor, solicite uno nuevo.' };
+    return { status: 'ERROR', message: 'El código ingresado es incorrecto o ha expirado. Por favor, intente de nuevo.' };
   }
 
   const tokenData = JSON.parse(tokenDataString);
   const tokenGuardado = tokenData.token;
   const timestampGuardado = tokenData.timestamp;
   const ahora = new Date().getTime();
-  const expirado = (ahora - timestampGuardado) >= (TOKEN_EXPIRATION_MINUTES * 60 * 1000);
 
-  if (tokenGuardado === tokenIngresado && !expirado) {
-    // El token es correcto y no ha expirado. Lo eliminamos para que sea de un solo uso.
-    scriptProperties.deleteProperty(propertyKey);
+  if (tokenGuardado === tokenIngresado && (ahora - timestampGuardado) < (TOKEN_EXPIRATION_MINUTES * 60 * 1000)) {
     Logger.log(`Token validado con éxito para DNI ${dniLimpio}.`);
     return { status: 'OK', message: 'Token correcto.' };
   } else {

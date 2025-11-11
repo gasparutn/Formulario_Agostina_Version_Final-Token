@@ -72,7 +72,8 @@ const COL_COMPROBANTE_MANUAL_CUOTA2 = 45; // AS (antes 44)
 const COL_COMPROBANTE_MANUAL_CUOTA3 = 46; // AT (antes 45)
 const COL_ENVIAR_EMAIL_MANUAL = 47; // AU (antes 46)
 const COL_VINCULO_PRINCIPAL = 48; // AV (NUEVA - PUNTO 34)
-
+const COL_EDIT_TOKEN = 49; // AW (NUEVA - Para edición segura)
+const COL_TOKEN_EXPIRATION = 50; // AX (NUEVA - Para expiración de token)
 
 // (Punto 25) CONSTANTES PARA LA NUEVA HOJA "Preventa"
 const NOMBRE_HOJA_PREVENTA = 'PRE-VENTA';
